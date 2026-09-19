@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tavasya Capital — Investments</title>
+<script>
+  // Runs before the stylesheet loads, so the right theme is on screen
+  // from the very first paint instead of flashing dark-then-light on
+  // every visit. Shares the same storage key as the compliance app, so
+  // whichever theme you pick in one carries over to the other.
+  try {
+    var savedTheme = localStorage.getItem("tavasya-theme") || "dark";
+    document.documentElement.setAttribute("data-theme", savedTheme);
+  } catch (e) {}
+</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%230F1210'/%3E%3Ctext x='50' y='68' font-family='Georgia,serif' font-size='58' font-style='italic' fill='%23C9A24B' text-anchor='middle' transform='rotate(8 50 50)'%3E%CE%B6%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ BOOT ============ -->
+<div id="boot-splash" class="boot-splash">
+  <div class="mark" aria-hidden="true">ζ</div>
+  <p>Starting up…</p>
+</div>
+
+<!-- ============ SIGN IN ============ -->
+<div id="view-auth" class="auth-screen" hidden>
+  <div class="auth-card">
+    <div class="mark" aria-hidden="true">ζ</div>
+    <h1 class="auth-title">Tavasya Capital <span class="ital">Investments</span></h1>
+    <p class="auth-sub">Sign in with your @tavasyacapital.in address.</p>
+
+    <form id="form-auth" class="auth-form" novalidate>
+      <label class="field">
+        <span>Email</span>
+        <input type="email" id="auth-email" autocomplete="username" required placeholder="you@tavasyacapital.in">
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input type="password" id="auth-password" autocomplete="current-password" required minlength="6">
+      </label>
+      <p id="auth-error" class="auth-error" hidden></p>
+      <button type="submit" id="btn-auth" class="btn btn-primary btn-block">Continue</button>
+      <button type="button" id="btn-reset" class="btn-link">Set or reset my password</button>
+    </form>
+    <p class="auth-note">First time here? Enter any password — it becomes your account for this app, and a confirmation link is sent to your inbox. This is a separate login from the Compliance Register, so the password doesn't have to match.</p>
+  </div>
+</div>
+
+<!-- ============ VERIFY EMAIL ============ -->
+<div id="view-verify" class="auth-screen" hidden>
+  <div class="auth-card">
+    <div class="mark" aria-hidden="true">ζ</div>
+    <h1 class="auth-title">Confirm your <span class="ital">email</span></h1>
+    <p class="auth-sub">We sent a confirmation link to <strong id="verify-email"></strong>. Open it, then reload this page.</p>
+    <button id="btn-reload" class="btn btn-primary btn-block">I've confirmed — reload</button>
+    <button id="btn-signout-verify" class="btn-link">Use a different account</button>
+  </div>
+</div>
+
+<!-- ============ NOT SET UP ============ -->
+<div id="view-notsetup" class="auth-screen" hidden>
+  <div class="auth-card">
+    <div class="mark" aria-hidden="true">ζ</div>
+    <h1 class="auth-title">Not set up <span class="ital">yet</span></h1>
+    <p class="auth-sub">Your account works, but nobody's added <strong id="notsetup-email"></strong> to the team list yet. Ask an admin to add you from the Team tab.</p>
+    <button id="btn-signout-notsetup" class="btn-link">Sign out</button>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="view-app" class="app" hidden>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="mark small" aria-hidden="true">ζ</span>
+      <span class="brand-name">TAVASYA CAPITAL</span>
+      <span class="brand-sep">/</span>
+      <span class="brand-sub">Investments</span>
+    </div>
+    <nav class="tabs" id="main-tabs">
+      <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="investments">Investments</button>
+      <button class="tab" data-tab="tasks">Tasks</button>
+      <button class="tab" data-tab="schemes">Schemes</button>
+      <button class="tab" data-tab="team">Team</button>
+    </nav>
+    <div class="who">
+      <button id="btn-theme" class="btn-icon theme-toggle" title="Switch theme">🌙</button>
+      <span id="who-name"></span>
+      <button id="btn-signout" class="btn-link">Sign out</button>
+    </div>
+  </header>
+
+  <!-- ---------- SCHEME FILTER BAR (global — drives every tab) ---------- -->
+  <div class="scheme-bar">
+    <div class="scheme-bar-inner">
+      <span class="scheme-bar-label">Scheme</span>
+      <div class="scheme-pills" id="scheme-pills"></div>
+    </div>
+  </div>
+
+  <!-- ---------- DASHBOARD ---------- -->
+  <section id="tab-dashboard" class="tab-panel active">
+    <div class="hero">
+      <p class="eyebrow" id="hero-eyebrow">All schemes</p>
+      <h1 class="hero-title">Every position, and what it <span class="ital">still needs.</span></h1>
+      <p class="dm-caption" id="dm-caption">Loading investments…</p>
+    </div>
+
+    <div class="kpi-strip" id="kpi-strip">
+      <div class="kpi" data-status="OVERDUE"><span class="kpi-num" id="k-overdue">–</span><span class="kpi-label">Overdue tasks</span></div>
+      <div class="kpi" data-status="DUE SOON"><span class="kpi-num" id="k-duesoon">–</span><span class="kpi-label">Due this week</span></div>
+      <div class="kpi" data-status="UPCOMING"><span class="kpi-num" id="k-upcoming">–</span><span class="kpi-label">Upcoming</span></div>
+      <div class="kpi" data-status="OPEN"><span class="kpi-num" id="k-open">–</span><span class="kpi-label">Open (no date)</span></div>
+      <div class="kpi" data-status="DONE"><span class="kpi-num" id="k-done">–</span><span class="kpi-label">Completed</span></div>
+    </div>
+
+    <div class="stat-row">
+      <div class="stat">
+        <span class="stat-num" id="s-investments">–</span>
+        <span class="stat-label">Investments</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num" id="s-deployed">–</span>
+        <span class="stat-label">Acquisition cost (₹ cr)</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num" id="s-face">–</span>
+        <span class="stat-label">Face / claim value (₹ cr)</span>
+      </div>
+      <div class="stat">
+        <span class="stat-num" id="s-live">–</span>
+        <span class="stat-label">Live (not exited)</span>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-head weekly-head">
+          <div class="weekly-title-group">
+            <h2 id="weekly-title">Tasks due</h2>
+            <button id="btn-clear-status-filter" class="week-today-btn" hidden>✕ Clear filter</button>
+          </div>
+          <div class="week-nav" id="week-nav">
+            <button id="btn-week-prev" class="btn-icon" title="Previous week">←</button>
+            <button id="btn-week-today" class="btn-link week-today-btn">This week</button>
+            <button id="btn-week-next" class="btn-icon" title="Next week">→</button>
+          </div>
+        </div>
+        <div id="overdue-section" hidden>
+          <p class="section-label overdue-label">Overdue — regardless of week</p>
+          <div id="overdue-list" class="week-list"></div>
+        </div>
+        <p class="section-label" id="week-section-label">This week</p>
+        <div id="due-this-week" class="week-list"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>By stage</h2></div>
+        <div id="stage-breakdown" class="stage-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- INVESTMENTS ---------- -->
+  <section id="tab-investments" class="tab-panel">
+
+    <!-- ...... list view ...... -->
+    <div id="inv-list-view">
+      <div class="panel-head panel-head-row">
+        <h2 id="inv-list-title">Investments</h2>
+        <div class="register-actions">
+          <button id="btn-add-investment" class="btn btn-primary">+ Add investment</button>
+        </div>
+      </div>
+
+      <div class="filters">
+        <input type="search" id="f-inv-search" placeholder="Search name, counterparty, sector…">
+        <select id="f-inv-stage"><option value="">All stages</option></select>
+        <select id="f-inv-instrument"><option value="">All instruments</option></select>
+        <select id="f-inv-archived">
+          <option value="live">Active only</option>
+          <option value="all">Include archived</option>
+          <option value="archived">Archived only</option>
+        </select>
+      </div>
+
+      <div id="inv-grid" class="inv-grid"></div>
+      <p id="inv-empty" class="empty" hidden>No investments match those filters.</p>
+    </div>
+
+    <!-- ...... detail view ...... -->
+    <div id="inv-detail-view" hidden>
+      <button id="btn-back-to-list" class="btn-link back-link">← All investments</button>
+
+      <div class="detail-header">
+        <div>
+          <p class="eyebrow" id="dv-scheme"></p>
+          <h1 class="detail-title" id="dv-name"></h1>
+          <p class="detail-sub" id="dv-subline"></p>
+        </div>
+        <div class="detail-header-actions">
+          <span class="badge" id="dv-stage"></span>
+          <button id="btn-edit-investment" class="btn">Edit</button>
+        </div>
+      </div>
+
+      <div class="fact-grid" id="dv-facts"></div>
+
+      <div class="panel" style="margin-top:28px">
+        <div class="panel-head weekly-head">
+          <div class="weekly-title-group">
+            <h2>Tasks</h2>
+            <span class="task-count" id="dv-task-count"></span>
+          </div>
+          <div class="register-actions">
+            <label class="check show-done-check"><input type="checkbox" id="dv-show-done"> Show completed</label>
+            <button id="btn-add-task" class="btn btn-primary">+ Add task</button>
+          </div>
+        </div>
+        <div id="dv-tasks" class="task-list"></div>
+        <p id="dv-tasks-empty" class="empty-note" hidden>No tasks yet. Add the first one — a diligence item, a filing, a payment date, anything you want to be reminded about.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------- TASKS (across all investments) ---------- -->
+  <section id="tab-tasks" class="tab-panel">
+    <div class="panel-head panel-head-row">
+      <h2 id="tasks-title">All tasks</h2>
+    </div>
+
+    <div class="filters">
+      <input type="search" id="f-task-search" placeholder="Search tasks…">
+      <select id="f-task-status">
+        <option value="">All statuses</option>
+        <option value="OVERDUE">Overdue</option>
+        <option value="DUE SOON">Due soon</option>
+        <option value="UPCOMING">Upcoming</option>
+        <option value="OPEN">Open (no date)</option>
+        <option value="DONE">Completed</option>
+      </select>
+      <select id="f-task-owner"><option value="">All owners</option></select>
+      <select id="f-task-category"><option value="">All categories</option></select>
+    </div>
+
+    <div class="table-wrap">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th></th><th>Due</th><th>Days</th><th>Status</th><th>Task</th>
+            <th>Investment</th><th>Scheme</th><th>Category</th><th>Owner</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="tasks-body"></tbody>
+      </table>
+      <p id="tasks-empty" class="empty" hidden>Nothing matches those filters.</p>
+    </div>
+  </section>
+
+  <!-- ---------- SCHEMES ---------- -->
+  <section id="tab-schemes" class="tab-panel">
+    <div class="panel-head panel-head-row">
+      <h2>Schemes</h2>
+      <button id="btn-add-scheme" class="btn btn-primary" hidden>+ Add scheme</button>
+    </div>
+    <div class="table-wrap">
+      <table class="ledger">
+        <thead><tr><th>Name</th><th>Code</th><th>Investments</th><th>Status</th><th></th></tr></thead>
+        <tbody id="schemes-body"></tbody>
+      </table>
+    </div>
+    <p class="empty-note" style="padding:16px 0 0">
+      Each active scheme gets its own button in the bar at the top of every page.
+      Archiving one hides that button and takes it out of the dropdowns — its investments and their
+      history stay exactly as they are, and restoring it brings everything back.
+    </p>
+  </section>
+
+  <!-- ---------- TEAM ---------- -->
+  <section id="tab-team" class="tab-panel">
+    <div class="panel-head panel-head-row">
+      <h2>Team</h2>
+      <button id="btn-add-person" class="btn btn-primary" hidden>+ Add person</button>
+    </div>
+    <p class="empty-note" style="padding:0 0 16px">
+      Anyone listed here with an @tavasyacapital.in address can sign in. Adding someone doesn't create
+      their password — they set that themselves the first time they sign in. Removing someone locks
+      them out immediately while leaving everything they owned intact.
+    </p>
+    <div class="table-wrap">
+      <table class="ledger">
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Investments owned</th><th>Open tasks</th><th>Status</th><th></th></tr></thead>
+        <tbody id="team-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<!-- ============ DRAWER: add/edit investment ============ -->
+<div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+<aside id="drawer" class="drawer" hidden aria-hidden="true">
+  <div class="drawer-head">
+    <h2 id="drawer-title">Add investment</h2>
+    <button id="btn-drawer-close" class="btn-icon" aria-label="Close">✕</button>
+  </div>
+  <form id="form-investment" class="drawer-form">
+    <input type="hidden" id="i-id">
+
+    <label class="field"><span>Investment name *</span>
+      <input type="text" id="i-name" required placeholder="e.g. K-Lifestyle &amp; Industries — CIRP"></label>
+
+    <label class="field"><span>Scheme *</span>
+      <select id="i-scheme" required></select></label>
+
+    <label class="field"><span>Counterparty / corporate debtor</span>
+      <input type="text" id="i-counterparty" placeholder="Registered name of the target or borrower"></label>
+
+    <div class="field-row">
+      <label class="field"><span>Instrument</span>
+        <select id="i-instrument"></select></label>
+      <label class="field"><span>Stage</span>
+        <select id="i-stage"></select></label>
+    </div>
+
+    <div class="field-row">
+      <label class="field"><span>Sector</span>
+        <select id="i-sector"></select></label>
+      <label class="field"><span>Investment date</span>
+        <input type="date" id="i-date"></label>
+    </div>
+
+    <div class="field-row">
+      <label class="field"><span>Acquisition cost (₹ cr)</span>
+        <input type="number" id="i-cost" step="0.01" min="0" placeholder="0.00"></label>
+      <label class="field"><span>Face / claim value (₹ cr)</span>
+        <input type="number" id="i-face" step="0.01" min="0" placeholder="0.00"></label>
+    </div>
+    <p class="field-hint">Both in ₹ crore. Leave blank while a deal is still being screened — the dashboard simply skips blanks rather than counting them as zero.</p>
+
+    <label class="field"><span>NCLT / CIRP reference</span>
+      <input type="text" id="i-nclt" placeholder="e.g. CP (IB) No. 123/ND/2025"></label>
+
+    <label class="field"><span>Owner</span>
+      <select id="i-owner"><option value="">Unassigned</option></select></label>
+
+    <label class="field"><span>Document link</span>
+      <input type="url" id="i-link" placeholder="https://tavasya.sharepoint.com/… — IM, IC note, VDR folder"></label>
+
+    <label class="field"><span>Notes</span>
+      <textarea id="i-notes" rows="4" placeholder="Thesis in a line or two, key risks, anything the next person opening this should know."></textarea></label>
+
+    <label class="check"><input type="checkbox" id="i-archived"> Archived — hide from the default list</label>
+
+    <p id="drawer-error" class="auth-error" hidden></p>
+    <div class="drawer-actions">
+      <button type="button" id="btn-delete-investment" class="btn btn-danger" hidden>Delete</button>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</aside>
+
+<!-- ============ DRAWER: add/edit task ============ -->
+<div id="task-backdrop" class="drawer-backdrop" hidden></div>
+<aside id="task-drawer" class="drawer" hidden aria-hidden="true">
+  <div class="drawer-head">
+    <h2 id="task-drawer-title">Add task</h2>
+    <button id="btn-task-close" class="btn-icon" aria-label="Close">✕</button>
+  </div>
+  <form id="form-task" class="drawer-form">
+    <input type="hidden" id="t-id">
+    <input type="hidden" id="t-investment-id">
+
+    <p class="drawer-context" id="t-context"></p>
+
+    <label class="field"><span>Task *</span>
+      <input type="text" id="t-title" required placeholder="e.g. File Section 29A affidavit"></label>
+
+    <fieldset class="type-block">
+      <legend>Type of task</legend>
+      <label class="radio-row">
+        <input type="radio" name="t-type" id="t-type-timed" value="timed" checked>
+        <span>
+          <strong>Time-bound</strong>
+          <em>Has a due date. Email reminders go out from the lead time you pick below, daily, until it's marked complete.</em>
+        </span>
+      </label>
+      <label class="radio-row">
+        <input type="radio" name="t-type" id="t-type-open" value="open">
+        <span>
+          <strong>Open / no date</strong>
+          <em>Tracked on the investment and counted as open, but never emails anyone.</em>
+        </span>
+      </label>
+    </fieldset>
+
+    <div id="t-timed-fields">
+      <div class="field-row">
+        <label class="field"><span>Due date *</span>
+          <input type="date" id="t-duedate"></label>
+        <label class="field"><span>Start reminders</span>
+          <select id="t-lead"></select></label>
+      </div>
+      <p class="field-hint">The first email lands that many days before the due date, then daily — escalating once it's overdue.</p>
+    </div>
+
+    <div class="field-row">
+      <label class="field"><span>Category</span>
+        <select id="t-category"></select></label>
+      <label class="field"><span>Priority</span>
+        <select id="t-priority">
+          <option value="Normal">Normal</option>
+          <option value="High">High</option>
+          <option value="Critical">Critical</option>
+        </select></label>
+    </div>
+
+    <div class="field-row">
+      <label class="field"><span>Owner</span>
+        <select id="t-owner"><option value="">Unassigned</option></select></label>
+      <label class="field"><span>CC on reminders</span>
+        <select id="t-cc"><option value="">None</option></select></label>
+    </div>
+    <p class="field-hint">An unassigned task's reminders go to every Admin, so nothing falls through silently.</p>
+
+    <label class="field"><span>Link</span>
+      <input type="url" id="t-link" placeholder="https://… — draft, filing, or supporting document"></label>
+
+    <label class="field"><span>Notes</span>
+      <textarea id="t-notes" rows="3"></textarea></label>
+
+    <fieldset class="done-block">
+      <label class="check"><input type="checkbox" id="t-completed"> Marked complete</label>
+      <div id="t-done-fields" class="done-fields" hidden>
+        <label class="field"><span>Completed on</span><input type="date" id="t-completedon"></label>
+        <label class="field"><span>Completion note</span><input type="text" id="t-completionnote" placeholder="Optional — what was done, or a reference number"></label>
+      </div>
+    </fieldset>
+
+    <p id="task-error" class="auth-error" hidden></p>
+    <div class="drawer-actions">
+      <button type="button" id="btn-delete-task" class="btn btn-danger" hidden>Delete</button>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</aside>
+
+<!-- ============ DRAWER: add/edit person ============ -->
+<div id="person-backdrop" class="drawer-backdrop" hidden></div>
+<aside id="person-drawer" class="drawer" hidden aria-hidden="true">
+  <div class="drawer-head">
+    <h2 id="person-drawer-title">Add person</h2>
+    <button id="btn-person-close" class="btn-icon" aria-label="Close">✕</button>
+  </div>
+  <form id="form-person" class="drawer-form">
+    <input type="hidden" id="p-original-email">
+
+    <label class="field"><span>Full name *</span>
+      <input type="text" id="p-name" required placeholder="e.g. Ritika Sharma"></label>
+
+    <label class="field"><span>Work email *</span>
+      <input type="email" id="p-email" required placeholder="name@tavasyacapital.in"></label>
+    <p class="field-hint" id="p-email-hint">Must be an @tavasyacapital.in address. This is also their username — it can't be changed later, so check the spelling.</p>
+
+    <label class="field"><span>Role</span>
+      <select id="p-role">
+        <option value="member">Member — add and edit investments and tasks</option>
+        <option value="teamlead">Team Lead — the above, plus delete a task</option>
+        <option value="admin">Admin — everything, including the team list</option>
+      </select></label>
+
+    <label class="check"><input type="checkbox" id="p-active" checked> Active — can sign in</label>
+
+    <p id="person-error" class="auth-error" hidden></p>
+    <div class="drawer-actions">
+      <span></span>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</aside>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

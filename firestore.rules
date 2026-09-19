@@ -1,0 +1,148 @@
+rules_version = '2';
+
+// ============================================================
+//  Tavasya Capital — Investments: security rules
+//
+//  Paste the whole of this file into
+//  Firebase Console → Firestore Database → Rules → Publish,
+//  on the NEW investments project.
+//
+//  This project is entirely separate from the compliance register's,
+//  so nothing here can affect that app and nothing there can affect
+//  this one. Publish this on the wrong project and you would wipe out
+//  the compliance rules — so check the project name at the top of the
+//  Firebase console before you hit Publish.
+//
+//  These rules are the ONLY thing protecting your data. The app's
+//  screens just hide buttons; the rules actually enforce who can do
+//  what, including for anyone poking at the database directly.
+//
+//  Roles:
+//    admin    — everything, plus managing the team list, adding and
+//               archiving schemes, and deleting an investment.
+//    teamlead — everything a member can, plus deleting a task.
+//    member   — see everything; add and edit investments and tasks;
+//               cannot delete anything.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // EDIT THIS ONE LINE if the domain ever changes. Escape dots as [.] — it's a regex.
+    function emailPattern() {
+      return '^[^@]+@tavasyacapital[.]in$';
+    }
+
+    function callerEmail() {
+      return request.auth.token.email.lower();
+    }
+
+    // Signed in, inbox confirmed, and on our domain.
+    function onDomain() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email_verified == true
+        && callerEmail().matches(emailPattern());
+    }
+
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(callerEmail())).data;
+    }
+
+    // On the domain AND on the team list AND not switched off. All three
+    // matter: a valid @tavasyacapital.in account that nobody has added to
+    // the team list still gets nowhere.
+    function isMember() {
+      return onDomain()
+        && exists(/databases/$(database)/documents/users/$(callerEmail()))
+        && profile().active == true;
+    }
+
+    function isAdmin() {
+      return isMember() && profile().role == 'admin';
+    }
+    function isTeamLead() {
+      return isMember() && profile().role == 'teamlead';
+    }
+
+    // ---------- the team list ----------
+    // Everyone can read their own entry, which is what the sign-in check
+    // itself needs. Any active member can read the whole roster, needed to
+    // put names against owners. Only an admin can change it.
+    // Document ID is the person's lowercase email.
+    match /users/{email} {
+      allow get:  if isMember() || (onDomain() && callerEmail() == email);
+      allow list: if isMember();
+      allow write: if isAdmin();
+    }
+
+    // ---------- schemes ----------
+    // Everyone active can see the list — it drives the button bar and the
+    // investment form's dropdown. Only an admin can add or archive one.
+    // Document ID is the scheme's short code (e.g. "SSF").
+    match /schemes/{schemeId} {
+      allow get, list: if isMember();
+      allow create, update: if isAdmin();
+      allow delete: if false; // archive (active:false) instead — existing
+                              // investments still reference the code
+    }
+
+    // ---------- investments ----------
+    // One document per position held by a Scheme. Auto-generated IDs: two
+    // investments in the same scheme can legitimately share a name (separate
+    // tranches, for instance), so there's no natural composite key here.
+    //
+    // Deletion is admin-only, as a guard rail against losing a record along
+    // with all its tasks. Everyone else archives instead (archived: true),
+    // which keeps the history and just hides it from the default list.
+    match /investments/{investmentId} {
+      allow get, list: if isMember();
+
+      allow create: if isMember()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.schemeCode is string
+        && request.resource.data.schemeCode.size() > 0;
+
+      allow update: if isMember();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- investment tasks ----------
+    // Children of an investment, linked by investmentId. Two kinds:
+    //   taskType == 'timed' — has a dueDate, and the daily script emails
+    //                         its owner from reminderLeadDays out.
+    //   taskType == 'open'  — tracked but never emails anyone.
+    //
+    // Deleting is allowed for Admin and Team Lead, a notch looser than
+    // investments: a stray task is ordinary housekeeping, not data loss.
+    match /investmentTasks/{taskId} {
+      allow get, list: if isMember();
+
+      allow create: if isMember()
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.investmentId is string
+        && request.resource.data.investmentId.size() > 0
+        && request.resource.data.completed is bool
+        && request.resource.data.taskType in ['timed', 'open'];
+
+      allow update: if isMember();
+      allow delete: if isAdmin() || isTeamLead();
+    }
+
+    // ---------- reminder log ----------
+    // Written only by the scheduled script, which authenticates with a
+    // service account and bypasses these rules entirely. Members can read
+    // it to see what was last sent; nobody writes it from the browser.
+    match /investmentReminderLog/{taskId} {
+      allow get, list: if isMember();
+      allow write: if false;
+    }
+
+    // Nothing else is reachable.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
