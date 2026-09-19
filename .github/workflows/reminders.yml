@@ -1,0 +1,28 @@
+name: Daily investment task reminders
+
+on:
+  schedule:
+    # 03:30 UTC = 09:00 IST. GitHub's cron can drift a few minutes under load.
+    - cron: "30 3 * * *"
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab to test
+
+jobs:
+  send-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install firebase-admin nodemailer
+
+      - name: Send reminders
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          MS365_EMAIL: ${{ secrets.MS365_EMAIL }}
+          MS365_APP_PASSWORD: ${{ secrets.MS365_APP_PASSWORD }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: node scripts/send-reminders.js
