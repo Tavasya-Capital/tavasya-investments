@@ -7,7 +7,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
   getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc,
-  deleteDoc, serverTimestamp, writeBatch
+  deleteDoc, serverTimestamp, writeBatch, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 /* ============================ setup ============================ */
@@ -24,6 +24,7 @@ const state = {
   schemes: [],
   investments: [],
   tasks: [],
+  optionLists: {},           // dropdown values added from inside the app
   schemeFilter: "",          // "" = all schemes; otherwise a scheme code
   openInvestmentId: null,    // non-null when the detail view is showing
   showDoneTasks: false,
@@ -103,6 +104,10 @@ const STATUS_LABEL = {
   "OPEN": "Open", "DONE": "Completed"
 };
 const statusClass = (s) => s.replace(/\s/g, "");
+// Priorities can now be added by hand, so strip anything that wouldn't be
+// valid in a CSS class name. A custom priority simply gets the neutral
+// default styling; High and Critical keep their colours.
+const prioClass = (p) => "prio-" + String(p ?? "").replace(/[^A-Za-z0-9]/g, "");
 const badge = (s) => `<span class="badge badge-${statusClass(s)}">${STATUS_LABEL[s] || esc(s)}</span>`;
 
 const personName = (email) => {
@@ -238,7 +243,7 @@ async function boot() {
   state.profile = snap.data();
   $("who-name").textContent = `${state.profile.name || user.email} · ${roleLabel(state.profile.role)}`;
 
-  await Promise.all([loadTeam(), loadSchemes(), loadInvestments(), loadTasks()]);
+  await Promise.all([loadTeam(), loadSchemes(), loadInvestments(), loadTasks(), loadOptionLists()]);
   await ensureDefaultSchemes();
 
   $("btn-add-person").hidden = !isAdmin();
@@ -301,29 +306,187 @@ async function loadTasks() {
   const snap = await getDocs(collection(db, "investmentTasks"));
   state.tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
+async function loadOptionLists() {
+  const snap = await getDocs(collection(db, "optionLists"));
+  state.optionLists = {};
+  snap.docs.forEach((d) => {
+    const v = d.data().values;
+    state.optionLists[d.id] = Array.isArray(v) ? v : [];
+  });
+}
+
+/* ============================ custom dropdown values ============================
+
+   Every dropdown below ends with a "+ Add new…" choice. Picking it asks for
+   the new value, saves it to the `optionLists` collection, and selects it —
+   so it's there for everyone, in every browser, from then on.
+
+   What a dropdown offers is the union of three things, in this order:
+     1. the starting list in config.js,
+     2. anything added from inside the app since,
+     3. any value already sitting on a record.
+   (3) is the safety net: even if a value were removed from the stored list,
+   the records still using it keep rendering their own value rather than
+   silently falling back to blank.
+   ============================================================================ */
+const ADD_NEW = "__add_new__";
+
+const OPTION_FIELDS = {
+  instrument: { noun: "instrument", seed: () => OPTIONS.instruments,    used: () => state.investments.map((i) => i.instrument) },
+  stage:      { noun: "stage",      seed: () => OPTIONS.stages,         used: () => state.investments.map((i) => i.stage) },
+  sector:     { noun: "sector",     seed: () => OPTIONS.sectors,        used: () => state.investments.map((i) => i.sector) },
+  category:   { noun: "category",   seed: () => OPTIONS.taskCategories, used: () => state.tasks.map((t) => t.category) },
+  priority:   { noun: "priority",   seed: () => OPTIONS.priorities,     used: () => state.tasks.map((t) => t.priority) }
+};
+
+function optionsFor(key) {
+  const f = OPTION_FIELDS[key];
+  const seen = new Set();
+  const out = [];
+  const push = (v) => {
+    const s = String(v ?? "").trim();
+    if (!s || seen.has(s.toLowerCase())) return;
+    seen.add(s.toLowerCase());
+    out.push(s);
+  };
+  f.seed().forEach(push);
+  (state.optionLists[key] || []).forEach(push);
+  f.used().forEach(push);
+  return out;
+}
+
+// Reminder lead times are numbers rather than labels, so they get their own
+// version of the same idea — deduplicated and sorted, not order-preserved.
+function leadDayOptions() {
+  const nums = new Set(OPTIONS.reminderLeadDays.map(Number));
+  (state.optionLists.leadDays || []).forEach((n) => { if (Number(n) > 0) nums.add(Number(n)); });
+  state.tasks.forEach((t) => { if (Number(t.reminderLeadDays) > 0) nums.add(Number(t.reminderLeadDays)); });
+  return [...nums].sort((a, b) => a - b);
+}
+
+async function saveOption(key, value) {
+  await setDoc(doc(db, "optionLists", key), {
+    values: arrayUnion(value),
+    updatedAt: serverTimestamp(),
+    updatedBy: state.user.email
+  }, { merge: true });
+  state.optionLists[key] = [...(state.optionLists[key] || []), value];
+}
+
+function wireAddNew(id, key) {
+  const sel = $(id);
+  const noun = OPTION_FIELDS[key].noun;
+  sel.addEventListener("change", async () => {
+    if (sel.value !== ADD_NEW) { sel.dataset.prev = sel.value; return; }
+
+    const value = (prompt(`New ${noun} — type it exactly as it should appear everywhere:`) || "").trim();
+    if (!value) { sel.value = sel.dataset.prev || ""; return; }
+
+    const existing = optionsFor(key).find((v) => v.toLowerCase() === value.toLowerCase());
+    if (existing) {
+      alert(`"${existing}" is already on the list.`);
+      sel.value = existing;
+      sel.dataset.prev = existing;
+      return;
+    }
+
+    try {
+      await saveOption(key, value);
+      populateSelects();
+      sel.value = value;
+      sel.dataset.prev = value;
+      toast(`${noun[0].toUpperCase()}${noun.slice(1)} added`);
+    } catch (e) {
+      alert("Couldn't save that: " + e.message);
+      sel.value = sel.dataset.prev || "";
+    }
+  });
+}
+
+function wireAddNewLeadDays() {
+  const sel = $("t-lead");
+  sel.addEventListener("change", async () => {
+    if (sel.value !== ADD_NEW) { sel.dataset.prev = sel.value; return; }
+
+    const raw = (prompt("Start reminders how many days before the due date?") || "").trim();
+    const days = Number(raw);
+    if (!raw || !Number.isInteger(days) || days < 1 || days > 730) {
+      if (raw) alert("Enter a whole number of days between 1 and 730.");
+      sel.value = sel.dataset.prev || "15";
+      return;
+    }
+    if (leadDayOptions().includes(days)) {
+      sel.value = String(days);
+      sel.dataset.prev = sel.value;
+      return;
+    }
+    try {
+      await saveOption("leadDays", days);
+      populateSelects();
+      sel.value = String(days);
+      sel.dataset.prev = sel.value;
+      toast("Lead time added");
+    } catch (e) {
+      alert("Couldn't save that: " + e.message);
+      sel.value = sel.dataset.prev || "15";
+    }
+  });
+}
+
+["i-instrument", "i-stage", "i-sector"].forEach((id, n) => wireAddNew(id, ["instrument", "stage", "sector"][n]));
+wireAddNew("t-category", "category");
+wireAddNew("t-priority", "priority");
+wireAddNewLeadDays();
 
 /* ============================ shared selects ============================ */
+const SELECT_IDS = [
+  "i-scheme", "i-instrument", "i-stage", "i-sector", "i-owner",
+  "f-inv-stage", "f-inv-instrument",
+  "t-lead", "t-category", "t-priority", "t-owner", "t-cc",
+  "f-task-owner", "f-task-category"
+];
+
 function populateSelects() {
   const opt = (v, label) => `<option value="${esc(v)}">${esc(label ?? v)}</option>`;
+  const list = (key) => optionsFor(key).map((v) => opt(v)).join("");
+  const addNew = `<option value="${ADD_NEW}">+ Add new…</option>`;
   const people = state.team.filter((t) => t.active).map((t) => opt(t.email, t.name || t.email)).join("");
 
+  // Rebuilding a <select> wipes its selection, which would quietly clear a
+  // half-filled form when someone adds a new dropdown value mid-edit. So
+  // remember every selection first and put back the ones that still exist.
+  const prev = {};
+  SELECT_IDS.forEach((id) => { prev[id] = $(id).value; });
+
+  // Scheme and Owner deliberately have no "+ Add new…": a scheme is a
+  // structural thing with its own short code, created on the Schemes tab,
+  // and an owner has to be a real account from the Team tab.
   $("i-scheme").innerHTML = activeSchemes().map((s) => opt(s.code, s.name)).join("");
-  $("i-instrument").innerHTML = '<option value="">—</option>' + OPTIONS.instruments.map((v) => opt(v)).join("");
-  $("i-stage").innerHTML = OPTIONS.stages.map((v) => opt(v)).join("");
-  $("i-sector").innerHTML = '<option value="">—</option>' + OPTIONS.sectors.map((v) => opt(v)).join("");
   $("i-owner").innerHTML = '<option value="">Unassigned</option>' + people;
-
-  $("f-inv-stage").innerHTML = '<option value="">All stages</option>' + OPTIONS.stages.map((v) => opt(v)).join("");
-  $("f-inv-instrument").innerHTML = '<option value="">All instruments</option>' + OPTIONS.instruments.map((v) => opt(v)).join("");
-
-  $("t-lead").innerHTML = OPTIONS.reminderLeadDays
-    .map((d) => `<option value="${d}"${d === 15 ? " selected" : ""}>${d} day${d === 1 ? "" : "s"} before</option>`).join("");
-  $("t-category").innerHTML = '<option value="">—</option>' + OPTIONS.taskCategories.map((v) => opt(v)).join("");
   $("t-owner").innerHTML = '<option value="">Unassigned</option>' + people;
   $("t-cc").innerHTML = '<option value="">None</option>' + people;
 
+  $("i-instrument").innerHTML = '<option value="">—</option>' + list("instrument") + addNew;
+  $("i-stage").innerHTML = list("stage") + addNew;
+  $("i-sector").innerHTML = '<option value="">—</option>' + list("sector") + addNew;
+  $("t-category").innerHTML = '<option value="">—</option>' + list("category") + addNew;
+  $("t-priority").innerHTML = list("priority") + addNew;
+  $("t-lead").innerHTML = leadDayOptions()
+    .map((d) => `<option value="${d}">${d} day${d === 1 ? "" : "s"} before</option>`).join("") + addNew;
+
+  // Filters list the same values but never offer to add one — you can only
+  // filter by something that exists.
+  $("f-inv-stage").innerHTML = '<option value="">All stages</option>' + list("stage");
+  $("f-inv-instrument").innerHTML = '<option value="">All instruments</option>' + list("instrument");
   $("f-task-owner").innerHTML = '<option value="">All owners</option><option value="__none__">Unassigned</option>' + people;
-  $("f-task-category").innerHTML = '<option value="">All categories</option>' + OPTIONS.taskCategories.map((v) => opt(v)).join("");
+  $("f-task-category").innerHTML = '<option value="">All categories</option>' + list("category");
+
+  SELECT_IDS.forEach((id) => {
+    const sel = $(id);
+    const want = prev[id];
+    if (want && want !== ADD_NEW && [...sel.options].some((o) => o.value === want)) sel.value = want;
+    sel.dataset.prev = sel.value;
+  });
 }
 
 /* ============================ scheme pills ============================ */
@@ -408,7 +571,6 @@ function renderDashboard() {
 
   $("s-investments").textContent = invs.length;
   $("s-deployed").textContent = fmtCr(sumCr(invs, "acquisitionCost"));
-  $("s-face").textContent = fmtCr(sumCr(invs, "faceValue"));
   $("s-live").textContent = invs.filter((i) => !["Exited", "Dropped"].includes(i.stage)).length;
 
   const overdue = by("OVERDUE");
@@ -426,8 +588,9 @@ function renderDashboard() {
 }
 
 function renderStageBreakdown(invs) {
-  const max = Math.max(1, ...OPTIONS.stages.map((s) => invs.filter((i) => i.stage === s).length));
-  $("stage-breakdown").innerHTML = OPTIONS.stages.map((s) => {
+  const stages = optionsFor("stage");
+  const max = Math.max(1, ...stages.map((s) => invs.filter((i) => i.stage === s).length));
+  $("stage-breakdown").innerHTML = stages.map((s) => {
     const n = invs.filter((i) => i.stage === s).length;
     return `<div class="stage-row">
       <span class="stage-name">${esc(s)}</span>
@@ -599,7 +762,7 @@ function cardHtml(i) {
     </div>
     <div class="inv-card-figures">
       <span><span class="inv-fig-label">Acq. cost</span><span class="inv-fig-value">${fmtCr(i.acquisitionCost)}</span></span>
-      <span><span class="inv-fig-label">Face value</span><span class="inv-fig-value">${fmtCr(i.faceValue)}</span></span>
+      <span><span class="inv-fig-label">Claim value</span><span class="inv-fig-value">${fmtCr(i.faceValue)}</span></span>
       <span><span class="inv-fig-label">Owner</span><span class="inv-fig-value" style="font-family:inherit">${esc(personName(i.ownerEmail))}</span></span>
     </div>
     <div class="inv-card-tasks">${taskLine}</div>
@@ -650,7 +813,7 @@ function renderInvestmentDetail() {
 
   $("dv-facts").innerHTML =
     fact("Acquisition cost", money(i.acquisitionCost), "mono") +
-    fact("Face / claim value", money(i.faceValue), "mono") +
+    fact("Claim value", money(i.faceValue), "mono") +
     fact("Investment date", i.investmentDate ? fmtDay(i.investmentDate) : '<span class="muted">—</span>', "mono") +
     fact("Owner", plain(i.ownerEmail ? personName(i.ownerEmail) : "")) +
     fact("NCLT / CIRP reference", plain(i.ncltRef)) +
@@ -692,7 +855,7 @@ function renderTaskList(i) {
         <div class="task-sub">
           ${t.taskType === "timed" && t.dueDate ? `<span class="task-due">${fmtDay(t.dueDate)}${dayLabel ? ` · ${dayLabel}` : ""}</span>` : `<span>No date</span>`}
           ${t.category ? `<span class="type-tag">${esc(t.category)}</span>` : ""}
-          ${t.priority && t.priority !== "Normal" ? `<span class="prio-tag prio-${esc(t.priority)}">${esc(t.priority)}</span>` : ""}
+          ${t.priority && t.priority !== "Normal" ? `<span class="prio-tag ${prioClass(t.priority)}">${esc(t.priority)}</span>` : ""}
           <span>${esc(personName(t.ownerEmail))}</span>
           ${t.link ? `<a class="row-link" href="${esc(t.link)}" target="_blank" rel="noopener">Link</a>` : ""}
         </div>
@@ -1035,7 +1198,7 @@ function renderTasksTab() {
       <td class="col-due">${t.dueDate ? fmtDay(t.dueDate) : "—"}</td>
       <td class="col-days">${days === null ? "—" : days}</td>
       <td>${badge(s)}</td>
-      <td><span class="oblig-name">${esc(t.title)}</span>${t.priority && t.priority !== "Normal" ? ` <span class="prio-tag prio-${esc(t.priority)}">${esc(t.priority)}</span>` : ""}</td>
+      <td><span class="oblig-name">${esc(t.title)}</span>${t.priority && t.priority !== "Normal" ? ` <span class="prio-tag ${prioClass(t.priority)}">${esc(t.priority)}</span>` : ""}</td>
       <td>${esc(inv ? inv.name : "—")}</td>
       <td>${esc(inv ? (inv.schemeName || inv.schemeCode) : "—")}</td>
       <td>${t.category ? `<span class="type-tag">${esc(t.category)}</span>` : "—"}</td>

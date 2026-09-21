@@ -87,6 +87,22 @@ service cloud.firestore {
                               // investments still reference the code
     }
 
+    // ---------- dropdown values ----------
+    // One document per dropdown (instrument, stage, sector, category,
+    // priority, leadDays), each holding a `values` array of whatever has
+    // been added from inside the app via "+ Add new…".
+    //
+    // Deliberately open to any active member, like compliance types in the
+    // other app: these are labels, not structural entities, and needing an
+    // admin to add "Slump Sale" mid-form would just push people to type it
+    // into the notes instead. Nothing here can expose data — a stray value
+    // is cosmetic, and an admin can tidy the list.
+    match /optionLists/{listId} {
+      allow get, list: if isMember();
+      allow create, update: if isMember();
+      allow delete: if isAdmin();
+    }
+
     // ---------- investments ----------
     // One document per position held by a Scheme. Auto-generated IDs: two
     // investments in the same scheme can legitimately share a name (separate

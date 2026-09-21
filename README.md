@@ -54,7 +54,7 @@ maintained here, in this app's own Team tab.
 | Sector | |
 | Investment date | |
 | Acquisition cost (₹ cr) | Left blank stays blank — never counted as zero |
-| Face / claim value (₹ cr) | Same |
+| Claim value (₹ cr) | Same |
 | NCLT / CIRP reference | |
 | Owner | From the team list |
 | Document link | IM, IC note, VDR folder — wherever it actually lives |
@@ -63,6 +63,11 @@ maintained here, in this app's own Team tab.
 
 Adding a field later is a small change to `config.js` and two spots in
 `index.html` — it does not require touching existing records.
+
+**Every dropdown can be extended from inside the app.** Instrument, stage,
+sector, task category, priority and reminder lead time each end with a
+**+ Add new…** choice: pick it, type the value, and it's saved for
+everyone from then on. The lists in `config.js` are only the starting set.
 
 ## What one task holds
 
@@ -269,6 +274,7 @@ repo. `.gitignore` is set up to help you avoid committing it by accident.
 |---|---|
 | `users` | The team roster and roles. Managed from the Team tab |
 | `schemes` | The scheme list. Managed from the Schemes tab |
+| `optionLists` | Dropdown values added from inside the app via "+ Add new…" |
 | `investments` | One document per position |
 | `investmentTasks` | One document per task, linked by `investmentId` |
 | `investmentReminderLog` | What the daily mail last sent (written by the script only) |

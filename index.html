@@ -109,7 +109,7 @@
   <section id="tab-dashboard" class="tab-panel active">
     <div class="hero">
       <p class="eyebrow" id="hero-eyebrow">All schemes</p>
-      <h1 class="hero-title">Every position, and what it <span class="ital">still needs.</span></h1>
+      <h1 class="hero-title">Every position, <span class="ital">seen through.</span></h1>
       <p class="dm-caption" id="dm-caption">Loading investments…</p>
     </div>
 
@@ -129,10 +129,6 @@
       <div class="stat">
         <span class="stat-num" id="s-deployed">–</span>
         <span class="stat-label">Acquisition cost (₹ cr)</span>
-      </div>
-      <div class="stat">
-        <span class="stat-num" id="s-face">–</span>
-        <span class="stat-label">Face / claim value (₹ cr)</span>
       </div>
       <div class="stat">
         <span class="stat-num" id="s-live">–</span>
@@ -315,7 +311,7 @@
     <input type="hidden" id="i-id">
 
     <label class="field"><span>Investment name *</span>
-      <input type="text" id="i-name" required placeholder="e.g. K-Lifestyle &amp; Industries — CIRP"></label>
+      <input type="text" id="i-name" required placeholder="e.g. Nurit Properties Private Limited"></label>
 
     <label class="field"><span>Scheme *</span>
       <select id="i-scheme" required></select></label>
@@ -340,7 +336,7 @@
     <div class="field-row">
       <label class="field"><span>Acquisition cost (₹ cr)</span>
         <input type="number" id="i-cost" step="0.01" min="0" placeholder="0.00"></label>
-      <label class="field"><span>Face / claim value (₹ cr)</span>
+      <label class="field"><span>Claim value (₹ cr)</span>
         <input type="number" id="i-face" step="0.01" min="0" placeholder="0.00"></label>
     </div>
     <p class="field-hint">Both in ₹ crore. Leave blank while a deal is still being screened — the dashboard simply skips blanks rather than counting them as zero.</p>
@@ -381,7 +377,7 @@
     <p class="drawer-context" id="t-context"></p>
 
     <label class="field"><span>Task *</span>
-      <input type="text" id="t-title" required placeholder="e.g. File Section 29A affidavit"></label>
+      <input type="text" id="t-title" required placeholder="e.g. Prepare IC Note"></label>
 
     <fieldset class="type-block">
       <legend>Type of task</legend>
@@ -415,11 +411,7 @@
       <label class="field"><span>Category</span>
         <select id="t-category"></select></label>
       <label class="field"><span>Priority</span>
-        <select id="t-priority">
-          <option value="Normal">Normal</option>
-          <option value="High">High</option>
-          <option value="Critical">Critical</option>
-        </select></label>
+        <select id="t-priority"></select></label>
     </div>
 
     <div class="field-row">

@@ -33,6 +33,13 @@ export const firebaseConfig = {
 
 
 // 3. Dropdown values and starting data used across the app.
+//
+//    The lists below are STARTING values, not the final word. Every
+//    dropdown built from them ends with a "+ Add new…" choice, and
+//    anything added that way is saved to the database and appears for
+//    everyone, in every browser, from then on. You only need to edit
+//    this file if you want to change the starting set for a fresh
+//    deployment, or reorder the stages.
 export const OPTIONS = {
   // Seeded into the database the very first time an Admin signs in, so the
   // three scheme buttons are there from day one rather than an empty bar.
@@ -53,7 +60,9 @@ export const OPTIONS = {
   schemeOrder: ["SSF", "MS2", "MS3"],
 
   // Where an investment sits in its lifecycle. Order matters — the
-  // dashboard and the stage filter both follow this sequence.
+  // dashboard's "By stage" panel and the stage filter both follow this
+  // sequence, and any stage added later from the dropdown is appended
+  // after these.
   stages: [
     "Screening",
     "IC Review",
@@ -101,5 +110,9 @@ export const OPTIONS = {
     "Monitoring",
     "Exit",
     "Other"
-  ]
+  ],
+
+  // How urgent a task is. "Normal" is the default and shows no tag in
+  // the lists — only the ones above it get a coloured label.
+  priorities: ["Normal", "High", "Critical"]
 };
