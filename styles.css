@@ -248,7 +248,12 @@ table.ledger{ width:100%; border-collapse:collapse; font-size:13.5px }
 .ledger tbody tr:last-child td{ border-bottom:none }
 .ledger tbody tr:hover{ background:var(--bg-elev-2) }
 .col-due{ font-family:var(--font-mono); white-space:nowrap; color:var(--ink-dim) }
-.col-days{ font-family:var(--font-mono); white-space:nowrap; text-align:right }
+/* Count columns: monospaced so digits line up with each other, but aligned
+   LEFT to sit under their headers. Right-aligning numerals earns its keep
+   when you're comparing magnitudes down a long column of figures; these are
+   small counts, and having them drift to the far edge of a wide column just
+   reads as a misalignment. */
+.col-days{ font-family:var(--font-mono); white-space:nowrap; text-align:left }
 .badge{
   display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:600;
   letter-spacing:.03em; white-space:nowrap;
@@ -262,7 +267,15 @@ table.ledger{ width:100%; border-collapse:collapse; font-size:13.5px }
 .oblig-period{ display:block; font-size:12px; color:var(--ink-faint); margin-top:2px }
 .row-link{ color:var(--accent); font-size:12px; text-decoration:none }
 .row-link:hover{ text-decoration:underline }
-.row-actions{ display:flex; gap:8px; justify-content:flex-end; white-space:nowrap }
+/* The actions column (Link, Edit, Archive) sits under a blank header, so
+   pinning it to the right edge left it floating away from the grid every
+   other column follows — now aligned left like the rest.
+   Deliberately NOT a flex container: display:flex on a table cell collapses
+   the box to its own content height, so it rides up to the first line when
+   a neighbouring cell wraps onto three. Left as a table cell, it inherits
+   vertical-align:middle and sits on the row's centre line. */
+.row-actions{ text-align:left; white-space:nowrap }
+.row-actions > * + *{ margin-left:8px }
 .check-done{ width:17px; height:17px; accent-color:var(--done); cursor:pointer }
 .empty{ padding:40px 20px; text-align:center; color:var(--ink-faint) }
 
