@@ -25,9 +25,11 @@ maintained here, in this app's own Team tab.
   Mudrikaran Scheme II, Mudrikaran Scheme III to start with) plus "All
   schemes". Whichever is selected filters every tab underneath it, and the
   choice is remembered between visits.
-- **Dashboard** — task counts by status (each clickable to filter), total
-  acquisition cost and face value for the selected scheme, a week-by-week
-  "tasks due" panel you can page through, and a stage breakdown.
+- **Dashboard** — task counts by status (overdue, due this week, upcoming,
+  open, completed — each clickable to filter), the number of investments,
+  their total acquisition cost and how many are still live (not exited or
+  dropped) for the selected scheme, a week-by-week "tasks due" panel you
+  can page through, and a stage breakdown.
 - **Investments** — a card per investment showing stage, instrument,
   figures, owner and an at-a-glance task summary. Click through to a full
   detail view with every field and the complete task list.
@@ -61,8 +63,9 @@ maintained here, in this app's own Team tab.
 | Notes | |
 | Archived | Hides it from the default list without deleting anything |
 
-Adding a field later is a small change to `config.js` and two spots in
-`index.html` — it does not require touching existing records.
+Adding a field later means adding its input to the investment form in
+`index.html` and reading and saving it in `app.js` (`openInvestmentDrawer`
+and the save handler just below it). Existing records don't need touching.
 
 **Every dropdown can be extended from inside the app.** Instrument, stage,
 sector, task category, priority and reminder lead time each end with a
@@ -74,13 +77,21 @@ everyone from then on. The lists in `config.js` are only the starting set.
 Every task belongs to exactly one investment, and is one of two kinds:
 
 - **Time-bound** — has a due date and a reminder lead time (1, 3, 5, 7,
-  15, 30, 45, 60 or 90 days). The daily script starts emailing the owner
-  that many days out and keeps going, escalating once overdue, until
-  someone ticks it complete.
+  15, 30, 45, 60 or 90 days to start with, default 15; add any other
+  whole number of days up to 730 with **+ Add new…**). The daily script
+  starts emailing the owner that many days out and keeps going every day,
+  marking it overdue once the date passes, until someone ticks it
+  complete. If the task has a CC, that person gets it in their email too.
+  If it has no owner, every Admin gets it instead.
 - **Open / no date** — tracked on the investment and counted as open work,
   but never emails anyone.
 
-Plus: category, priority, owner, CC, link, notes, and completion details.
+Plus: category, priority (Normal, High, Critical, or one you add — only
+High and Critical get a coloured tag; a custom one gets a plain tag),
+owner, CC, link, notes, and completion details.
+
+Each person gets **one email a day** listing every task of theirs that's
+due or overdue, not one email per task.
 
 ---
 
@@ -99,6 +110,12 @@ the database by hand.
 ---
 
 ## Setup
+
+**This repository is already set up.** The Firebase project exists
+(`tavasya-investments`) and its web config is already in `config.js`, so
+the app works as-is at the address in Step 4. The steps below are for
+setting it up again from scratch, for example on a fresh Firebase
+project, or for checking how something was configured.
 
 Six steps. Budget about half an hour the first time.
 
@@ -121,12 +138,14 @@ Six steps. Budget about half an hour the first time.
    Firebase Hosting".
 3. Firebase shows a `firebaseConfig = { ... }` block. Copy it.
 4. Open **`config.js`** from this codebase in any text editor and paste it
-   over the placeholder block (the one full of `PASTE_YOUR_...`). Keep the
-   `export const` at the front of the line. `ORG_DOMAIN` is already right.
+   over the existing `firebaseConfig = { ... }` block (it currently holds
+   the `tavasya-investments` project's values). Keep the `export const` at
+   the front of the line. `ORG_DOMAIN` is already right.
 5. Save the file.
 
-If you skip this, the app loads its sign-in screen and then fails — that's
-the symptom of an unfilled `config.js`, not a bug.
+If `config.js` points at the wrong project, or at one that isn't set up,
+the app loads its sign-in screen and then fails. That's a config problem,
+not a bug.
 
 ### Step 3 — Publish the security rules
 
@@ -148,7 +167,8 @@ The domain is already set correctly (`tavasyacapital.in`) — no edit needed.
    scripts/send-reminders.js
    .github/workflows/reminders.yml
    ```
-   Upload the `config.js` you edited in Step 2, not the original.
+   If you're on a new Firebase project, upload the `config.js` you edited
+   in Step 2, not the original.
 3. Repo → **Settings → Pages** → Source: **Deploy from a branch**, branch
    `main`, folder `/ (root)` → **Save**.
 4. Wait ~30 seconds. Live at
@@ -234,7 +254,8 @@ due — no mail sent" on a quiet day is expected, not a failure. To force a
 real email, create a task due in two days with a 7-day lead, then run it
 again.
 
-Once confirmed, it runs itself daily at 9:00 IST.
+Once confirmed, it runs itself daily at 9:00 IST (03:30 UTC — GitHub's
+schedule can run a few minutes late when it's busy).
 
 ---
 
@@ -276,7 +297,7 @@ repo. `.gitignore` is set up to help you avoid committing it by accident.
 | `schemes` | The scheme list. Managed from the Schemes tab |
 | `optionLists` | Dropdown values added from inside the app via "+ Add new…" |
 | `investments` | One document per position |
-| `investmentTasks` | One document per task, linked by `investmentId` |
+| `investmentTasks` | One document per task, linked by `investmentId`. The daily script also writes `lastReminderSent` and `reminderCount` back onto each task it emails |
 | `investmentReminderLog` | What the daily mail last sent (written by the script only) |
 
 Nothing else exists in this project, and the rules block everything else
@@ -288,7 +309,7 @@ outright.
 
 | Symptom | Likely cause |
 |---|---|
-| Sign-in screen appears, then nothing works | `config.js` still has the `PASTE_YOUR_...` placeholders — Step 2 |
+| Sign-in screen appears, then nothing works | `config.js` points at the wrong Firebase project, or one that isn't set up — Step 2 |
 | "Missing or insufficient permissions" | Rules not published (Step 3), or the `users` document ID isn't the exact lowercase email, or `active` was saved as text `"true"` instead of boolean `true` |
 | Confirmation email never arrives | Check spam; confirm the GitHub Pages domain is in Authorised domains (Step 5) |
 | Signed in fine but told "Not set up yet" | That email isn't on the team list. Add it from the Team tab — or, for the very first account, Step 6 |
