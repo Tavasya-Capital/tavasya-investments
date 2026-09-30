@@ -69,9 +69,27 @@ export const OPTIONS = {
     "Approved",
     "Executed",
     "Monitoring",
-    "Exited",
+    "Exit",
     "Dropped"
   ],
+
+  // Where a CIRP case sits before it becomes an investment. These drive the
+  // CIRP tab. Once the resolution plan is approved, "Move to Investments"
+  // on the case moves it to the Investments tab, tasks and all. Any stage
+  // added later from the dropdown is appended after these.
+  cirpStages: [
+    "Evaluating",
+    "EOI submitted",
+    "Shortlisted (PRA list)",
+    "Resolution plan submitted",
+    "Plan approved by CoC",
+    "Plan approved by NCLT",
+    "Withdrawn"
+  ],
+
+  // Optional. Which tranche of a position this record is, when a Scheme
+  // goes into the same investment more than once.
+  tranches: ["Tranche 1", "Tranche 2", "Tranche 3"],
 
   // What the Scheme actually holds. Add to this list freely; existing
   // records keep whatever they were saved with.

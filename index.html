@@ -85,6 +85,7 @@
     </div>
     <nav class="tabs" id="main-tabs">
       <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="cirp">CIRP</button>
       <button class="tab" data-tab="investments">Investments</button>
       <button class="tab" data-tab="tasks">Tasks</button>
       <button class="tab" data-tab="schemes">Schemes</button>
@@ -134,6 +135,10 @@
         <span class="stat-num" id="s-live">–</span>
         <span class="stat-label">Live (not exited)</span>
       </div>
+      <div class="stat">
+        <span class="stat-num" id="s-cirp">–</span>
+        <span class="stat-label">CIRP cases in progress</span>
+      </div>
     </div>
 
     <div class="two-col">
@@ -164,6 +169,36 @@
     </div>
   </section>
 
+  <!-- ---------- CIRP ----------
+       Resolution-plan cases the team is pursuing. They live here until the
+       plan is approved, then "Move to Investments" hands them over to the
+       Investments tab with their tasks intact. Opening a case borrows the
+       same detail view the Investments tab uses (see #inv-detail-view). -->
+  <section id="tab-cirp" class="tab-panel">
+    <div id="cirp-list-view">
+      <div class="panel-head panel-head-row">
+        <h2 id="cirp-list-title">CIRP</h2>
+        <div class="register-actions">
+          <button id="btn-add-cirp" class="btn btn-primary">+ Add CIRP case</button>
+        </div>
+      </div>
+
+      <div class="filters">
+        <input type="search" id="f-cirp-search" placeholder="Search name, corporate debtor, sector…">
+        <select id="f-cirp-stage"><option value="">All CIRP stages</option></select>
+        <select id="f-cirp-archived">
+          <option value="live">Active only</option>
+          <option value="all">Include archived</option>
+          <option value="archived">Archived only</option>
+        </select>
+      </div>
+
+      <div id="cirp-grid" class="inv-grid"></div>
+      <p id="cirp-empty" class="empty" hidden>No CIRP cases match those filters.</p>
+    </div>
+    <div id="cirp-detail-slot"></div>
+  </section>
+
   <!-- ---------- INVESTMENTS ---------- -->
   <section id="tab-investments" class="tab-panel">
 
@@ -191,7 +226,10 @@
       <p id="inv-empty" class="empty" hidden>No investments match those filters.</p>
     </div>
 
-    <!-- ...... detail view ...... -->
+    <!-- ...... detail view ......
+         Shared by the Investments and CIRP tabs. The script moves it into
+         whichever tab the open record belongs to. -->
+    <div id="inv-detail-slot">
     <div id="inv-detail-view" hidden>
       <button id="btn-back-to-list" class="btn-link back-link">← All investments</button>
 
@@ -203,6 +241,7 @@
         </div>
         <div class="detail-header-actions">
           <span class="badge" id="dv-stage"></span>
+          <button id="btn-move-track" class="btn" hidden></button>
           <button id="btn-edit-investment" class="btn">Edit</button>
         </div>
       </div>
@@ -224,6 +263,7 @@
         <p id="dv-tasks-empty" class="empty-note" hidden>No tasks yet. Add the first one — a diligence item, a filing, a payment date, anything you want to be reminded about.</p>
       </div>
     </div>
+    </div>
   </section>
 
   <!-- ---------- TASKS (across all investments) ---------- -->
@@ -244,13 +284,17 @@
       </select>
       <select id="f-task-owner"><option value="">All owners</option></select>
       <select id="f-task-category"><option value="">All categories</option></select>
+      <select id="f-task-sort" title="How the list is ordered">
+        <option value="custom">Our order (drag ⠿ to rearrange)</option>
+        <option value="due">By status and due date</option>
+      </select>
     </div>
 
     <div class="table-wrap">
       <table class="ledger">
         <thead>
           <tr>
-            <th></th><th>Due</th><th>Days</th><th>Status</th><th>Task</th>
+            <th class="col-drag"></th><th></th><th>Due</th><th>Days</th><th>Status</th><th>Task</th>
             <th>Investment</th><th>Scheme</th><th>Category</th><th>Owner</th><th></th>
           </tr>
         </thead>
@@ -309,6 +353,7 @@
   </div>
   <form id="form-investment" class="drawer-form">
     <input type="hidden" id="i-id">
+    <input type="hidden" id="i-track">
 
     <label class="field"><span>Investment name *</span>
       <input type="text" id="i-name" required placeholder="e.g. Nurit Properties Private Limited"></label>
@@ -322,15 +367,24 @@
     <div class="field-row">
       <label class="field"><span>Instrument</span>
         <select id="i-instrument"></select></label>
-      <label class="field"><span>Stage</span>
+      <label class="field" id="i-stage-field"><span>Stage</span>
         <select id="i-stage"></select></label>
+      <label class="field" id="i-cirp-stage-field" hidden><span>CIRP stage</span>
+        <select id="i-cirp-stage"></select></label>
     </div>
 
     <div class="field-row">
       <label class="field"><span>Sector</span>
         <select id="i-sector"></select></label>
+      <label class="field"><span>Investment tranche</span>
+        <select id="i-tranche"></select></label>
+    </div>
+
+    <div class="field-row">
       <label class="field"><span>Investment date</span>
         <input type="date" id="i-date"></label>
+      <label class="field"><span>Owner</span>
+        <select id="i-owner"><option value="">Unassigned</option></select></label>
     </div>
 
     <div class="field-row">
@@ -343,9 +397,6 @@
 
     <label class="field"><span>NCLT / CIRP reference</span>
       <input type="text" id="i-nclt" placeholder="e.g. CP (IB) No. 123/ND/2025"></label>
-
-    <label class="field"><span>Owner</span>
-      <select id="i-owner"><option value="">Unassigned</option></select></label>
 
     <label class="field"><span>Document link</span>
       <input type="url" id="i-link" placeholder="https://tavasya.sharepoint.com/… — IM, IC note, VDR folder"></label>
@@ -427,6 +478,16 @@
 
     <label class="field"><span>Notes</span>
       <textarea id="t-notes" rows="3"></textarea></label>
+
+    <fieldset class="type-block subtask-block">
+      <legend>Sub-tasks</legend>
+      <div id="t-subtasks" class="subtask-editor"></div>
+      <div class="subtask-add">
+        <input type="text" id="t-subtask-new" placeholder="e.g. Execute share purchase agreement">
+        <button type="button" id="btn-subtask-add" class="btn">Add</button>
+      </div>
+      <p class="field-hint subtask-hint">Smaller steps inside this task, such as executing individual documents. Tick them off here or straight from the task list. They don't send reminders of their own.</p>
+    </fieldset>
 
     <fieldset class="done-block">
       <label class="check"><input type="checkbox" id="t-completed"> Marked complete</label>

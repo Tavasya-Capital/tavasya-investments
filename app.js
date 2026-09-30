@@ -29,7 +29,9 @@ const state = {
   openInvestmentId: null,    // non-null when the detail view is showing
   showDoneTasks: false,
   dashStatusFilter: "",
-  weekOffset: 0
+  weekOffset: 0,
+  taskSort: "custom",        // "custom" = the team's drag-and-drop order; "due" = by status and date
+  expandedTasks: new Set()   // Tasks tab rows whose sub-task preview is open
 };
 
 const isAdmin = () => state.profile && state.profile.role === "admin";
@@ -37,6 +39,13 @@ const isTeamLead = () => state.profile && state.profile.role === "teamlead";
 const canDeleteTask = () => isAdmin() || isTeamLead();
 
 const SCHEME_KEY = "tavasya-inv-scheme";
+const TASK_SORT_KEY = "tavasya-inv-task-sort";
+
+// CIRP cases are investment records with track "cirp". They show on the
+// CIRP tab only, until "Move to Investments" sets track back to
+// "investment". Records saved before the CIRP tab existed have no track at
+// all, and count as investments.
+const isCirp = (i) => !!i && i.track === "cirp";
 
 /* ============================ theme ============================ */
 const THEME_KEY = "tavasya-theme";
@@ -109,6 +118,39 @@ const statusClass = (s) => s.replace(/\s/g, "");
 // default styling; High and Critical keep their colours.
 const prioClass = (p) => "prio-" + String(p ?? "").replace(/[^A-Za-z0-9]/g, "");
 const badge = (s) => `<span class="badge badge-${statusClass(s)}">${STATUS_LABEL[s] || esc(s)}</span>`;
+
+/* Task order. "By status and due date" is the fixed order the app always
+   used. "Our order" is the one the team sets by dragging rows on the Tasks
+   tab, saved as a `sortOrder` number on each task, so everyone sees the
+   same order. Completed tasks always sink to the bottom. A task nobody has
+   placed yet (no sortOrder) sits after the placed ones in the fixed order,
+   which means that until someone drags something, both orders match. */
+const STATUS_RANK = { "OVERDUE": 0, "DUE SOON": 1, "UPCOMING": 2, "OPEN": 3, "DONE": 4 };
+function byStatusThenDue(a, b) {
+  const d = STATUS_RANK[taskStatus(a)] - STATUS_RANK[taskStatus(b)];
+  if (d !== 0) return d;
+  return (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
+}
+function byTeamOrder(a, b) {
+  if (!!a.completed !== !!b.completed) return a.completed ? 1 : -1;
+  const pa = typeof a.sortOrder === "number", pb = typeof b.sortOrder === "number";
+  if (pa && pb && a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+  if (pa !== pb) return pa ? -1 : 1;
+  return byStatusThenDue(a, b);
+}
+const taskOrder = () => (state.taskSort === "due" ? byStatusThenDue : byTeamOrder);
+
+const subtaskCount = (t) => {
+  const all = t.subtasks || [];
+  return { done: all.filter((st) => st.done).length, total: all.length };
+};
+function subtaskListHtml(t) {
+  return `<ul class="subtask-list" data-task="${esc(t.id)}">${(t.subtasks || []).map((st) => `
+    <li><label class="subtask-item${st.done ? " done" : ""}">
+      <input type="checkbox" class="st-check" data-st="${esc(st.id)}" ${st.done ? "checked" : ""}>
+      <span>${esc(st.title)}</span>
+    </label></li>`).join("")}</ul>`;
+}
 
 const personName = (email) => {
   if (!email) return "Unassigned";
@@ -252,7 +294,9 @@ async function boot() {
   try {
     const saved = localStorage.getItem(SCHEME_KEY);
     if (saved && (saved === "" || activeSchemes().some((s) => s.code === saved))) state.schemeFilter = saved;
+    if (localStorage.getItem(TASK_SORT_KEY) === "due") state.taskSort = "due";
   } catch (e) {}
+  $("f-task-sort").value = state.taskSort;
 
   populateSelects();
   renderSchemePills();
@@ -300,6 +344,10 @@ async function ensureDefaultSchemes() {
 async function loadInvestments() {
   const snap = await getDocs(collection(db, "investments"));
   state.investments = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    // The "Exited" stage was renamed "Exit". Records saved before that still
+    // say "Exited" until someone next saves them, so read them as "Exit";
+    // otherwise both would show up as separate stages.
+    .map((i) => (i.stage === "Exited" ? { ...i, stage: "Exit" } : i))
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 }
 async function loadTasks() {
@@ -334,6 +382,8 @@ const ADD_NEW = "__add_new__";
 const OPTION_FIELDS = {
   instrument: { noun: "instrument", seed: () => OPTIONS.instruments,    used: () => state.investments.map((i) => i.instrument) },
   stage:      { noun: "stage",      seed: () => OPTIONS.stages,         used: () => state.investments.map((i) => i.stage) },
+  cirpStage:  { noun: "CIRP stage", seed: () => OPTIONS.cirpStages || [], used: () => state.investments.map((i) => i.cirpStage) },
+  tranche:    { noun: "tranche",    seed: () => OPTIONS.tranches || [], used: () => state.investments.map((i) => i.tranche) },
   sector:     { noun: "sector",     seed: () => OPTIONS.sectors,        used: () => state.investments.map((i) => i.sector) },
   category:   { noun: "category",   seed: () => OPTIONS.taskCategories, used: () => state.tasks.map((t) => t.category) },
   priority:   { noun: "priority",   seed: () => OPTIONS.priorities,     used: () => state.tasks.map((t) => t.priority) }
@@ -434,14 +484,16 @@ function wireAddNewLeadDays() {
 }
 
 ["i-instrument", "i-stage", "i-sector"].forEach((id, n) => wireAddNew(id, ["instrument", "stage", "sector"][n]));
+wireAddNew("i-cirp-stage", "cirpStage");
+wireAddNew("i-tranche", "tranche");
 wireAddNew("t-category", "category");
 wireAddNew("t-priority", "priority");
 wireAddNewLeadDays();
 
 /* ============================ shared selects ============================ */
 const SELECT_IDS = [
-  "i-scheme", "i-instrument", "i-stage", "i-sector", "i-owner",
-  "f-inv-stage", "f-inv-instrument",
+  "i-scheme", "i-instrument", "i-stage", "i-cirp-stage", "i-sector", "i-tranche", "i-owner",
+  "f-inv-stage", "f-inv-instrument", "f-cirp-stage",
   "t-lead", "t-category", "t-priority", "t-owner", "t-cc",
   "f-task-owner", "f-task-category"
 ];
@@ -469,6 +521,8 @@ function populateSelects() {
   $("i-instrument").innerHTML = '<option value="">—</option>' + list("instrument") + addNew;
   $("i-stage").innerHTML = list("stage") + addNew;
   $("i-sector").innerHTML = '<option value="">—</option>' + list("sector") + addNew;
+  $("i-cirp-stage").innerHTML = list("cirpStage") + addNew;
+  $("i-tranche").innerHTML = '<option value="">—</option>' + list("tranche") + addNew;
   $("t-category").innerHTML = '<option value="">—</option>' + list("category") + addNew;
   $("t-priority").innerHTML = list("priority") + addNew;
   $("t-lead").innerHTML = leadDayOptions()
@@ -478,6 +532,7 @@ function populateSelects() {
   // filter by something that exists.
   $("f-inv-stage").innerHTML = '<option value="">All stages</option>' + list("stage");
   $("f-inv-instrument").innerHTML = '<option value="">All instruments</option>' + list("instrument");
+  $("f-cirp-stage").innerHTML = '<option value="">All CIRP stages</option>' + list("cirpStage");
   $("f-task-owner").innerHTML = '<option value="">All owners</option><option value="__none__">Unassigned</option>' + people;
   $("f-task-category").innerHTML = '<option value="">All categories</option>' + list("category");
 
@@ -491,7 +546,10 @@ function populateSelects() {
 
 /* ============================ scheme pills ============================ */
 function renderSchemePills() {
-  const counts = (code) => state.investments.filter((i) => !i.archived && (!code || i.schemeCode === code)).length;
+  // The numbers count CIRP cases on the CIRP tab, and investments everywhere else.
+  const onCirp = (document.querySelector(".tab.active") || {}).dataset?.tab === "cirp";
+  const counts = (code) => state.investments.filter((i) =>
+    !i.archived && isCirp(i) === onCirp && (!code || i.schemeCode === code)).length;
   const pill = (code, label) => `
     <button class="scheme-pill${state.schemeFilter === code ? " active" : ""}" data-code="${esc(code)}">
       ${esc(label)}<span class="pill-count">${counts(code)}</span>
@@ -525,12 +583,12 @@ const currentSchemeName = () => {
 $("main-tabs").addEventListener("click", (e) => {
   const btn = e.target.closest(".tab");
   if (!btn) return;
-  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b === btn));
-  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + btn.dataset.tab));
+  goToTab(btn.dataset.tab);
 });
 const goToTab = (name) => {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === "tab-" + name));
+  renderSchemePills();
 };
 
 /* ============================ scoped data ============================ */
@@ -549,7 +607,7 @@ const tasksFor = (invId) => state.tasks.filter((t) => t.investmentId === invId);
 
 function renderAll() {
   renderDashboard();
-  renderInvestmentsTab();
+  renderTrackTabs();
   renderTasksTab();
   renderSchemes();
   renderTeam();
@@ -557,7 +615,11 @@ function renderAll() {
 
 /* ============================ dashboard ============================ */
 function renderDashboard() {
-  const invs = scopedInvestments().filter((i) => !i.archived);
+  // The investment figures leave CIRP cases out: they aren't positions yet.
+  // Their tasks still count in the task figures, since that's real work.
+  const live = scopedInvestments().filter((i) => !i.archived);
+  const invs = live.filter((i) => !isCirp(i));
+  const cirp = live.filter(isCirp);
   const tasks = scopedTasks();
 
   $("hero-eyebrow").textContent = currentSchemeName();
@@ -571,17 +633,20 @@ function renderDashboard() {
 
   $("s-investments").textContent = invs.length;
   $("s-deployed").textContent = fmtCr(sumCr(invs, "acquisitionCost"));
-  $("s-live").textContent = invs.filter((i) => !["Exited", "Dropped"].includes(i.stage)).length;
+  $("s-live").textContent = invs.filter((i) => !["Exit", "Dropped"].includes(i.stage)).length;
+  $("s-cirp").textContent = cirp.filter((i) => !/withdrawn/i.test(i.cirpStage || "")).length;
 
   const overdue = by("OVERDUE");
   const soon = by("DUE SOON");
-  $("dm-caption").innerHTML = invs.length === 0
-    ? `Nothing here yet — add the first investment under <strong>${esc(currentSchemeName())}</strong> to get started.`
+  const across = `<strong>${invs.length}</strong> investment${invs.length === 1 ? "" : "s"}` +
+    (cirp.length ? ` and <strong>${cirp.length}</strong> CIRP case${cirp.length === 1 ? "" : "s"}` : "");
+  $("dm-caption").innerHTML = live.length === 0
+    ? `Nothing here yet — add the first investment or CIRP case under <strong>${esc(currentSchemeName())}</strong> to get started.`
     : overdue
-      ? `<strong>${overdue}</strong> task${overdue === 1 ? "" : "s"} overdue across <strong>${invs.length}</strong> investment${invs.length === 1 ? "" : "s"}${soon ? `, and ${soon} more due this week` : ""}.`
+      ? `<strong>${overdue}</strong> task${overdue === 1 ? "" : "s"} overdue across ${across}${soon ? `, and ${soon} more due this week` : ""}.`
       : soon
-        ? `Nothing overdue. <strong>${soon}</strong> task${soon === 1 ? "" : "s"} due this week across <strong>${invs.length}</strong> investment${invs.length === 1 ? "" : "s"}.`
-        : `Nothing overdue or due this week across <strong>${invs.length}</strong> investment${invs.length === 1 ? "" : "s"}.`;
+        ? `Nothing overdue. <strong>${soon}</strong> task${soon === 1 ? "" : "s"} due this week across ${across}.`
+        : `Nothing overdue or due this week across ${across}.`;
 
   renderStageBreakdown(invs);
   renderWeeklyPanel();
@@ -690,44 +755,89 @@ document.querySelectorAll("#overdue-list, #due-this-week").forEach((el) => {
   });
 });
 
-/* ============================ investments tab ============================ */
-$("f-inv-search").addEventListener("input", renderInvestmentsTab);
-$("f-inv-stage").addEventListener("change", renderInvestmentsTab);
-$("f-inv-instrument").addEventListener("change", renderInvestmentsTab);
-$("f-inv-archived").addEventListener("change", renderInvestmentsTab);
+/* ============================ investments & CIRP tabs ============================
+   Both tabs list investment records as cards. The CIRP tab shows the ones
+   with track "cirp", the Investments tab shows everything else. They share
+   one detail view (#inv-detail-view), which is moved into whichever tab
+   the open record belongs to.
+   ============================================================================ */
+const TRACKS = {
+  investments: {
+    cirp: false, list: "inv-list-view", grid: "inv-grid", empty: "inv-empty",
+    slot: "inv-detail-slot", title: "inv-list-title", heading: "Investments",
+    search: "f-inv-search", stage: "f-inv-stage", instrument: "f-inv-instrument", archived: "f-inv-archived"
+  },
+  cirp: {
+    cirp: true, list: "cirp-list-view", grid: "cirp-grid", empty: "cirp-empty",
+    slot: "cirp-detail-slot", title: "cirp-list-title", heading: "CIRP",
+    search: "f-cirp-search", stage: "f-cirp-stage", instrument: null, archived: "f-cirp-archived"
+  }
+};
+const trackKeyOf = (i) => (isCirp(i) ? "cirp" : "investments");
 
-function renderInvestmentsTab() {
-  if (state.openInvestmentId && investmentById(state.openInvestmentId)) {
-    $("inv-list-view").hidden = true;
-    $("inv-detail-view").hidden = false;
+// What the stage badge says, and how it's coloured. CIRP stages are free
+// text people can add to, so they're coloured by what they say rather than
+// by a fixed list.
+const stageLabel = (i) => (isCirp(i) ? i.cirpStage || "Evaluating" : i.stage || "Screening");
+function stageBadgeClass(i) {
+  if (!isCirp(i)) return `badge-${statusClass(stageLabel(i))}`;
+  const s = stageLabel(i).toLowerCase();
+  if (/approved/.test(s)) return "badge-DONE";
+  if (/withdrawn|rejected|dropped/.test(s)) return "badge-ONGOING";
+  if (/submitted|shortlisted/.test(s)) return "badge-DUESOON";
+  return "badge-UPCOMING";
+}
+
+Object.entries(TRACKS).forEach(([key, T]) => {
+  [T.search, T.stage, T.instrument, T.archived].filter(Boolean)
+    .forEach((id) => $(id).addEventListener(id === T.search ? "input" : "change", () => renderTrackTab(key)));
+  $(T.grid).addEventListener("click", (e) => {
+    const card = e.target.closest(".inv-card");
+    if (card) openInvestment(card.dataset.id);
+  });
+});
+
+function renderTrackTabs() {
+  if (state.openInvestmentId && !investmentById(state.openInvestmentId)) state.openInvestmentId = null;
+  renderTrackTab("cirp");
+  renderTrackTab("investments");
+}
+
+function renderTrackTab(key) {
+  const T = TRACKS[key];
+  const detail = $("inv-detail-view");
+  const open = investmentById(state.openInvestmentId);
+  if (open && trackKeyOf(open) === key) {
+    if (detail.parentElement !== $(T.slot)) $(T.slot).appendChild(detail);
+    $(T.list).hidden = true;
+    detail.hidden = false;
     renderInvestmentDetail();
     return;
   }
-  state.openInvestmentId = null;
-  $("inv-list-view").hidden = false;
-  $("inv-detail-view").hidden = true;
+  $(T.list).hidden = false;
+  if (detail.parentElement === $(T.slot)) detail.hidden = true;
 
-  $("inv-list-title").textContent =
-    state.schemeFilter ? `Investments — ${currentSchemeName()}` : "Investments — all schemes";
+  $(T.title).textContent =
+    state.schemeFilter ? `${T.heading} — ${currentSchemeName()}` : `${T.heading} — all schemes`;
 
-  const q = $("f-inv-search").value.trim().toLowerCase();
-  const stage = $("f-inv-stage").value;
-  const instrument = $("f-inv-instrument").value;
-  const arch = $("f-inv-archived").value;
+  const q = $(T.search).value.trim().toLowerCase();
+  const stage = $(T.stage).value;
+  const instrument = T.instrument ? $(T.instrument).value : "";
+  const arch = $(T.archived).value;
 
-  let rows = scopedInvestments();
+  let rows = scopedInvestments().filter((i) => isCirp(i) === T.cirp);
   if (arch === "live") rows = rows.filter((i) => !i.archived);
   else if (arch === "archived") rows = rows.filter((i) => i.archived);
-  if (stage) rows = rows.filter((i) => i.stage === stage);
+  if (stage) rows = rows.filter((i) => stageLabel(i) === stage);
   if (instrument) rows = rows.filter((i) => i.instrument === instrument);
   if (q) {
     rows = rows.filter((i) =>
-      [i.name, i.counterparty, i.sector, i.ncltRef, i.notes, i.instrument]
+      [i.name, i.counterparty, i.sector, i.ncltRef, i.notes, i.instrument, i.tranche]
         .some((v) => String(v || "").toLowerCase().includes(q)));
   }
 
-  $("inv-empty").hidden = rows.length > 0;
-  $("inv-grid").innerHTML = rows.map(cardHtml).join("");
+  $(T.empty).hidden = rows.length > 0;
+  $(T.grid).innerHTML = rows.map(cardHtml).join("");
 }
 
 function cardHtml(i) {
@@ -753,10 +863,11 @@ function cardHtml(i) {
         <p class="inv-card-name">${esc(i.name)}</p>
         ${i.counterparty ? `<p class="inv-card-counterparty">${esc(i.counterparty)}</p>` : ""}
       </div>
-      <span class="badge badge-${statusClass(i.stage || "Screening")}">${esc(i.stage || "Screening")}</span>
+      <span class="badge ${stageBadgeClass(i)}">${esc(stageLabel(i))}</span>
     </div>
     <div class="inv-card-meta">
       ${i.instrument ? `<span class="type-tag">${esc(i.instrument)}</span>` : ""}
+      ${i.tranche ? `<span class="type-tag">${esc(i.tranche)}</span>` : ""}
       ${i.sector ? `<span class="type-tag">${esc(i.sector)}</span>` : ""}
       ${!state.schemeFilter ? `<span class="type-tag">${esc(i.schemeName || i.schemeCode || "")}</span>` : ""}
     </div>
@@ -769,19 +880,17 @@ function cardHtml(i) {
   </button>`;
 }
 
-$("inv-grid").addEventListener("click", (e) => {
-  const card = e.target.closest(".inv-card");
-  if (card) openInvestment(card.dataset.id);
-});
 $("btn-back-to-list").addEventListener("click", () => {
   state.openInvestmentId = null;
-  renderInvestmentsTab();
+  renderTrackTabs();
 });
 
 function openInvestment(id) {
+  const i = investmentById(id);
+  if (!i) return;
   state.openInvestmentId = id;
-  goToTab("investments");
-  renderInvestmentsTab();
+  goToTab(trackKeyOf(i));
+  renderTrackTabs();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -793,13 +902,22 @@ $("dv-show-done").addEventListener("change", () => {
 
 function renderInvestmentDetail() {
   const i = investmentById(state.openInvestmentId);
-  if (!i) { state.openInvestmentId = null; renderInvestmentsTab(); return; }
+  if (!i) { state.openInvestmentId = null; renderTrackTabs(); return; }
+  const cirp = isCirp(i);
 
-  $("dv-scheme").textContent = i.schemeName || i.schemeCode || "";
+  $("btn-back-to-list").textContent = cirp ? "← All CIRP cases" : "← All investments";
+  $("dv-scheme").textContent = (i.schemeName || i.schemeCode || "") + (cirp ? " · CIRP" : "");
   $("dv-name").textContent = i.name;
-  $("dv-subline").textContent = [i.counterparty, i.instrument, i.sector].filter(Boolean).join(" · ") || "—";
-  $("dv-stage").className = `badge badge-${statusClass(i.stage || "Screening")}`;
-  $("dv-stage").textContent = i.stage || "Screening";
+  $("dv-subline").textContent = [i.counterparty, i.instrument, i.tranche, i.sector].filter(Boolean).join(" · ") || "—";
+  $("dv-stage").className = `badge ${stageBadgeClass(i)}`;
+  $("dv-stage").textContent = stageLabel(i);
+
+  // A CIRP case can be moved to Investments at any point, and a record that
+  // came from CIRP can be sent back, in case it was moved by mistake.
+  const move = $("btn-move-track");
+  move.hidden = !cirp && !i.movedFromCirpOn;
+  move.textContent = cirp ? "Move to Investments →" : "↩ Back to CIRP";
+  move.classList.toggle("btn-primary", cirp);
 
   const fact = (label, value, cls = "") =>
     `<div class="fact"><p class="fact-label">${esc(label)}</p><p class="fact-value ${cls}">${value}</p></div>`;
@@ -816,7 +934,11 @@ function renderInvestmentDetail() {
     fact("Claim value", money(i.faceValue), "mono") +
     fact("Investment date", i.investmentDate ? fmtDay(i.investmentDate) : '<span class="muted">—</span>', "mono") +
     fact("Owner", plain(i.ownerEmail ? personName(i.ownerEmail) : "")) +
+    fact("Investment tranche", plain(i.tranche)) +
     fact("NCLT / CIRP reference", plain(i.ncltRef)) +
+    (!cirp && i.movedFromCirpOn
+      ? fact("Came from CIRP", `${fmtDay(i.movedFromCirpOn)}${i.cirpStage ? ` · ${esc(i.cirpStage)}` : ""}`)
+      : "") +
     fact("Document link", i.docLink ? `<a href="${esc(i.docLink)}" target="_blank" rel="noopener">Open</a>` : '<span class="muted">—</span>') +
     (i.archived ? fact("Status", '<span class="badge badge-ONGOING">Archived</span>') : "") +
     (i.notes ? `<div class="fact wide"><p class="fact-label">Notes</p><p class="fact-value">${esc(i.notes).replace(/\n/g, "<br>")}</p></div>` : "");
@@ -825,18 +947,13 @@ function renderInvestmentDetail() {
 }
 
 function renderTaskList(i) {
-  const order = { "OVERDUE": 0, "DUE SOON": 1, "UPCOMING": 2, "OPEN": 3, "DONE": 4 };
   let ts = tasksFor(i.id);
   const doneCount = ts.filter((t) => t.completed).length;
   $("dv-task-count").textContent =
     `${ts.length - doneCount} open${doneCount ? ` · ${doneCount} completed` : ""}`;
 
   if (!state.showDoneTasks) ts = ts.filter((t) => !t.completed);
-  ts.sort((a, b) => {
-    const d = order[taskStatus(a)] - order[taskStatus(b)];
-    if (d !== 0) return d;
-    return (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
-  });
+  ts.sort(taskOrder());
 
   $("dv-tasks-empty").hidden = ts.length > 0;
   $("dv-tasks-empty").textContent = tasksFor(i.id).length === 0
@@ -848,6 +965,7 @@ function renderTaskList(i) {
     const days = t.dueDate && !t.completed ? daysBetween(t.dueDate) : null;
     const dayLabel = days === null ? "" :
       days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? "today" : `in ${days}d`;
+    const sc = subtaskCount(t);
     return `<div class="task-row" data-id="${esc(t.id)}">
       <input type="checkbox" class="task-check" ${t.completed ? "checked" : ""} title="Mark complete">
       <div class="task-main">
@@ -858,7 +976,9 @@ function renderTaskList(i) {
           ${t.priority && t.priority !== "Normal" ? `<span class="prio-tag ${prioClass(t.priority)}">${esc(t.priority)}</span>` : ""}
           <span>${esc(personName(t.ownerEmail))}</span>
           ${t.link ? `<a class="row-link" href="${esc(t.link)}" target="_blank" rel="noopener">Link</a>` : ""}
+          ${sc.total ? `<span class="st-progress">${sc.done}/${sc.total} sub-tasks</span>` : ""}
         </div>
+        ${sc.total ? subtaskListHtml(t) : ""}
       </div>
       <div class="task-side">
         ${badge(s)}
@@ -878,8 +998,27 @@ $("dv-tasks").addEventListener("click", async (e) => {
     await setTaskCompleted(t, e.target.checked);
     return;
   }
+  if (e.target.classList.contains("st-check")) {
+    await setSubtaskDone(t, e.target.dataset.st, e.target.checked);
+    return;
+  }
   if (e.target.closest(".t-edit")) openTaskDrawer(t.investmentId, t);
 });
+
+async function setSubtaskDone(t, subtaskId, done) {
+  const subtasks = (t.subtasks || []).map((st) => st.id !== subtaskId ? st : {
+    ...st, done, doneOn: done ? todayISO() : "", doneBy: done ? state.user.email : ""
+  });
+  try {
+    await setDoc(doc(db, "investmentTasks", t.id), {
+      subtasks, updatedAt: serverTimestamp(), updatedBy: state.user.email
+    }, { merge: true });
+    t.subtasks = subtasks;
+  } catch (err) {
+    alert("Couldn't save that: " + err.message);
+  }
+  renderAll();
+}
 
 async function setTaskCompleted(t, completed) {
   try {
@@ -898,22 +1037,72 @@ async function setTaskCompleted(t, completed) {
   }
 }
 
+$("btn-move-track").addEventListener("click", async () => {
+  const i = investmentById(state.openInvestmentId);
+  if (!i) return;
+  const n = tasksFor(i.id).length;
+  const withTasks = n ? `, with its ${n} task${n === 1 ? "" : "s"},` : "";
+  let changes;
+
+  if (isCirp(i)) {
+    const approved = /approved/i.test(i.cirpStage || "");
+    if (!confirm(
+      `Move "${i.name}"${withTasks} to the Investments tab?\n\n` +
+      (approved ? "" : `Its CIRP stage is "${stageLabel(i)}", so the resolution plan isn't marked as approved yet. Move it anyway?\n\n`) +
+      `It starts there at the "${i.stage || "Approved"}" stage, which you can change. You can also send it back to CIRP later.`
+    )) return;
+    changes = {
+      track: "investment",
+      stage: i.stage || "Approved",
+      movedFromCirpOn: todayISO(),
+      movedFromCirpBy: state.user.email
+    };
+  } else {
+    if (!confirm(`Send "${i.name}"${withTasks} back to the CIRP tab?`)) return;
+    changes = { track: "cirp" };
+  }
+
+  try {
+    await setDoc(doc(db, "investments", i.id), {
+      ...changes, updatedAt: serverTimestamp(), updatedBy: state.user.email
+    }, { merge: true });
+    Object.assign(i, changes);
+    renderSchemePills();
+    openInvestment(i.id);
+    renderAll();
+    toast(isCirp(i) ? "Moved back to CIRP" : "Moved to Investments");
+  } catch (err) {
+    alert("Couldn't move it: " + err.message);
+  }
+});
+
 /* ============================ investment drawer ============================ */
-$("btn-add-investment").addEventListener("click", () => openInvestmentDrawer(null));
+$("btn-add-investment").addEventListener("click", () => openInvestmentDrawer(null, "investment"));
+$("btn-add-cirp").addEventListener("click", () => openInvestmentDrawer(null, "cirp"));
 $("btn-edit-investment").addEventListener("click", () => openInvestmentDrawer(investmentById(state.openInvestmentId)));
 $("btn-drawer-close").addEventListener("click", closeInvestmentDrawer);
 $("drawer-backdrop").addEventListener("click", closeInvestmentDrawer);
 
-function openInvestmentDrawer(i) {
+// `track` only matters for a new record: which tab's "+ Add" was pressed.
+// An existing record keeps the track it already has.
+function openInvestmentDrawer(i, track = "investment") {
+  const cirp = i ? isCirp(i) : track === "cirp";
   $("drawer-error").hidden = true;
-  $("drawer-title").textContent = i ? "Edit investment" : "Add investment";
+  $("drawer-title").textContent = `${i ? "Edit" : "Add"} ${cirp ? "CIRP case" : "investment"}`;
   $("i-id").value = i ? i.id : "";
+  $("i-track").value = cirp ? "cirp" : "investment";
+  $("i-stage-field").hidden = cirp;
+  $("i-cirp-stage-field").hidden = !cirp;
   $("i-name").value = i ? i.name || "" : "";
   $("i-scheme").value = i ? i.schemeCode || "" : (state.schemeFilter || (state.schemes[0] && state.schemes[0].code) || "");
   $("i-counterparty").value = i ? i.counterparty || "" : "";
-  $("i-instrument").value = i ? i.instrument || "" : "";
+  // A new CIRP case is almost always a resolution plan, so start it there.
+  const cirpInstrument = optionsFor("instrument").find((v) => /resolution plan/i.test(v)) || "";
+  $("i-instrument").value = i ? i.instrument || "" : (cirp ? cirpInstrument : "");
   $("i-stage").value = i ? i.stage || "Screening" : "Screening";
+  $("i-cirp-stage").value = (i && i.cirpStage) || optionsFor("cirpStage")[0] || "";
   $("i-sector").value = i ? i.sector || "" : "";
+  $("i-tranche").value = i ? i.tranche || "" : "";
   $("i-date").value = i ? i.investmentDate || "" : "";
   $("i-cost").value = i && i.acquisitionCost !== undefined && i.acquisitionCost !== null ? i.acquisitionCost : "";
   $("i-face").value = i && i.faceValue !== undefined && i.faceValue !== null ? i.faceValue : "";
@@ -948,14 +1137,20 @@ $("form-investment").addEventListener("submit", async (e) => {
   if (!schemeCode) { err.textContent = "Pick a scheme."; err.hidden = false; return; }
 
   const scheme = state.schemes.find((s) => s.code === schemeCode);
+  const cirp = $("i-track").value === "cirp";
+  const existing = investmentById($("i-id").value);
   const payload = {
     name,
     schemeCode,
     schemeName: scheme ? scheme.name : schemeCode,
     counterparty: $("i-counterparty").value.trim(),
     instrument: $("i-instrument").value,
-    stage: $("i-stage").value,
+    track: cirp ? "cirp" : "investment",
+    // A CIRP case has no investment stage until it's moved to Investments,
+    // so leave whatever it had (nothing, for a new case) untouched.
+    stage: cirp ? (existing ? existing.stage || "" : "") : $("i-stage").value,
     sector: $("i-sector").value,
+    tranche: $("i-tranche").value,
     investmentDate: $("i-date").value || "",
     acquisitionCost: numOrNull($("i-cost").value),
     faceValue: numOrNull($("i-face").value),
@@ -967,18 +1162,19 @@ $("form-investment").addEventListener("submit", async (e) => {
     updatedAt: serverTimestamp(),
     updatedBy: state.user.email
   };
+  if (cirp) payload.cirpStage = $("i-cirp-stage").value;
 
   try {
     const id = $("i-id").value;
     if (id) {
       await setDoc(doc(db, "investments", id), payload, { merge: true });
-      toast("Investment updated");
+      toast(cirp ? "CIRP case updated" : "Investment updated");
     } else {
       payload.createdAt = serverTimestamp();
       payload.createdBy = state.user.email;
       const ref = await addDoc(collection(db, "investments"), payload);
       state.openInvestmentId = ref.id;
-      toast("Investment added");
+      toast(cirp ? "CIRP case added" : "Investment added");
     }
     closeInvestmentDrawer();
     await loadInvestments();
@@ -1038,6 +1234,59 @@ $("t-completed").addEventListener("change", () => {
   if ($("t-completed").checked && !$("t-completedon").value) $("t-completedon").value = todayISO();
 });
 
+/* Sub-tasks are held on the task itself, as a `subtasks` array of
+   { id, title, done, doneOn, doneBy }. The drawer edits a working copy,
+   and saving the task saves the lot. */
+let draftSubtasks = [];
+const newSubtaskId = () => "st" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+function renderSubtaskEditor() {
+  $("t-subtasks").innerHTML = draftSubtasks.length
+    ? draftSubtasks.map((st, n) => `<div class="subtask-edit-row" data-n="${n}">
+        <input type="checkbox" class="st-edit-check" ${st.done ? "checked" : ""} title="Done">
+        <input type="text" class="st-edit-title" value="${esc(st.title)}" aria-label="Sub-task">
+        <button type="button" class="btn-icon st-edit-remove" title="Remove sub-task">✕</button>
+      </div>`).join("")
+    : `<p class="subtask-empty">No sub-tasks yet.</p>`;
+}
+
+function addDraftSubtask() {
+  const title = $("t-subtask-new").value.trim();
+  if (!title) return;
+  draftSubtasks.push({ id: newSubtaskId(), title, done: false, doneOn: "", doneBy: "" });
+  $("t-subtask-new").value = "";
+  renderSubtaskEditor();
+  $("t-subtask-new").focus();
+}
+$("btn-subtask-add").addEventListener("click", addDraftSubtask);
+
+// Enter in a sub-task box adds or keeps the sub-task. Without this it would
+// submit the whole task form.
+$("form-task").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (e.target.id === "t-subtask-new") { e.preventDefault(); addDraftSubtask(); }
+  else if (e.target.classList.contains("st-edit-title")) e.preventDefault();
+});
+$("t-subtasks").addEventListener("input", (e) => {
+  const row = e.target.closest(".subtask-edit-row");
+  if (!row || !e.target.classList.contains("st-edit-title")) return;
+  draftSubtasks[Number(row.dataset.n)].title = e.target.value;
+});
+$("t-subtasks").addEventListener("change", (e) => {
+  const row = e.target.closest(".subtask-edit-row");
+  if (!row || !e.target.classList.contains("st-edit-check")) return;
+  const st = draftSubtasks[Number(row.dataset.n)];
+  st.done = e.target.checked;
+  st.doneOn = st.done ? todayISO() : "";
+  st.doneBy = st.done ? state.user.email : "";
+});
+$("t-subtasks").addEventListener("click", (e) => {
+  const row = e.target.closest(".subtask-edit-row");
+  if (!row || !e.target.closest(".st-edit-remove")) return;
+  draftSubtasks.splice(Number(row.dataset.n), 1);
+  renderSubtaskEditor();
+});
+
 function openTaskDrawer(investmentId, t) {
   const inv = investmentById(investmentId);
   if (!inv) return;
@@ -1067,6 +1316,9 @@ function openTaskDrawer(investmentId, t) {
   $("t-completedon").value = t ? t.completedOn || "" : "";
   $("t-completionnote").value = t ? t.completionNote || "" : "";
   $("btn-delete-task").hidden = !(t && canDeleteTask());
+  draftSubtasks = ((t && t.subtasks) || []).map((st) => ({ ...st }));
+  $("t-subtask-new").value = "";
+  renderSubtaskEditor();
 
   $("task-drawer").hidden = false;
   $("task-drawer").setAttribute("aria-hidden", "false");
@@ -1096,6 +1348,12 @@ $("form-task").addEventListener("submit", async (e) => {
     err.hidden = false; return;
   }
 
+  // Anything typed in the "add" box but not yet added still counts.
+  addDraftSubtask();
+  const subtasks = draftSubtasks
+    .map((st) => ({ ...st, title: st.title.trim() }))
+    .filter((st) => st.title);
+
   const payload = {
     investmentId,
     investmentName: inv ? inv.name : "",
@@ -1115,6 +1373,7 @@ $("form-task").addEventListener("submit", async (e) => {
     completedOn: $("t-completed").checked ? ($("t-completedon").value || todayISO()) : "",
     completedBy: $("t-completed").checked ? state.user.email : "",
     completionNote: $("t-completed").checked ? $("t-completionnote").value.trim() : "",
+    subtasks,
     updatedAt: serverTimestamp(),
     updatedBy: state.user.email
   };
@@ -1127,6 +1386,10 @@ $("form-task").addEventListener("submit", async (e) => {
     } else {
       payload.createdAt = serverTimestamp();
       payload.createdBy = state.user.email;
+      // Once the team has put the list in its own order, a new task joins
+      // at the bottom of it. Before then there's no order to join.
+      const orders = state.tasks.map((x) => x.sortOrder).filter((v) => typeof v === "number");
+      if (orders.length) payload.sortOrder = Math.max(...orders) + 1;
       await addDoc(collection(db, "investmentTasks"), payload);
       toast("Task added");
     }
@@ -1158,6 +1421,11 @@ $("btn-delete-task").addEventListener("click", async () => {
 /* ============================ tasks tab ============================ */
 ["f-task-search", "f-task-status", "f-task-owner", "f-task-category"]
   .forEach((id) => $(id).addEventListener("input", renderTasksTab));
+$("f-task-sort").addEventListener("change", () => {
+  state.taskSort = $("f-task-sort").value === "due" ? "due" : "custom";
+  try { localStorage.setItem(TASK_SORT_KEY, state.taskSort); } catch (e) {}
+  renderAll();
+});
 
 function renderTasksTab() {
   $("tasks-title").textContent =
@@ -1167,6 +1435,8 @@ function renderTasksTab() {
   const status = $("f-task-status").value;
   const owner = $("f-task-owner").value;
   const cat = $("f-task-category").value;
+  const draggable = state.taskSort === "custom";
+  $("tasks-body").closest("table").classList.toggle("no-drag", !draggable);
 
   let rows = scopedTasks();
   if (status) rows = rows.filter((t) => taskStatus(t) === status);
@@ -1176,35 +1446,38 @@ function renderTasksTab() {
   if (q) {
     rows = rows.filter((t) => {
       const inv = investmentById(t.investmentId);
-      return [t.title, t.notes, t.category, inv && inv.name, inv && inv.counterparty]
+      return [t.title, t.notes, t.category, inv && inv.name, inv && inv.counterparty,
+        ...(t.subtasks || []).map((st) => st.title)]
         .some((v) => String(v || "").toLowerCase().includes(q));
     });
   }
-
-  const order = { "OVERDUE": 0, "DUE SOON": 1, "UPCOMING": 2, "OPEN": 3, "DONE": 4 };
-  rows.sort((a, b) => {
-    const d = order[taskStatus(a)] - order[taskStatus(b)];
-    if (d !== 0) return d;
-    return (a.dueDate || "9999").localeCompare(b.dueDate || "9999");
-  });
+  rows.sort(taskOrder());
 
   $("tasks-empty").hidden = rows.length > 0;
   $("tasks-body").innerHTML = rows.map((t) => {
     const inv = investmentById(t.investmentId);
     const s = taskStatus(t);
     const days = t.dueDate && !t.completed ? daysBetween(t.dueDate) : null;
-    return `<tr class="clickable" data-id="${esc(t.id)}" data-inv="${esc(t.investmentId)}">
+    const sc = subtaskCount(t);
+    const expanded = sc.total > 0 && state.expandedTasks.has(t.id);
+    return `<tr class="clickable task-tr" data-id="${esc(t.id)}" data-inv="${esc(t.investmentId)}">
+      <td class="col-drag">${draggable
+        ? `<button type="button" class="drag-handle" title="Drag to move, or focus and press ↑ / ↓" aria-label="Move ${esc(t.title)}">⠿</button>`
+        : ""}</td>
       <td><input type="checkbox" class="check-done t-row-check" ${t.completed ? "checked" : ""}></td>
       <td class="col-due">${t.dueDate ? fmtDay(t.dueDate) : "—"}</td>
       <td class="col-days">${days === null ? "—" : days}</td>
       <td>${badge(s)}</td>
-      <td><span class="oblig-name">${esc(t.title)}</span>${t.priority && t.priority !== "Normal" ? ` <span class="prio-tag ${prioClass(t.priority)}">${esc(t.priority)}</span>` : ""}</td>
-      <td>${esc(inv ? inv.name : "—")}</td>
+      <td><span class="oblig-name">${esc(t.title)}</span>${t.priority && t.priority !== "Normal" ? ` <span class="prio-tag ${prioClass(t.priority)}">${esc(t.priority)}</span>` : ""}
+        ${sc.total ? `<button type="button" class="st-toggle" aria-expanded="${expanded}">${expanded ? "▾" : "▸"} ${sc.done}/${sc.total} sub-tasks</button>` : ""}</td>
+      <td>${esc(inv ? inv.name : "—")}${isCirp(inv) ? ' <span class="type-tag">CIRP</span>' : ""}</td>
       <td>${esc(inv ? (inv.schemeName || inv.schemeCode) : "—")}</td>
       <td>${t.category ? `<span class="type-tag">${esc(t.category)}</span>` : "—"}</td>
       <td>${esc(personName(t.ownerEmail))}</td>
       <td class="row-actions">${t.link ? `<a class="row-link" href="${esc(t.link)}" target="_blank" rel="noopener">Link</a>` : ""}</td>
-    </tr>`;
+    </tr>${expanded ? `<tr class="subtask-tr" data-id="${esc(t.id)}">
+      <td class="col-drag"></td><td></td><td colspan="9">${subtaskListHtml(t)}</td>
+    </tr>` : ""}`;
   }).join("");
 }
 
@@ -1213,18 +1486,133 @@ $("tasks-body").addEventListener("click", async (e) => {
   if (!tr) return;
   const t = state.tasks.find((x) => x.id === tr.dataset.id);
   if (!t) return;
+  if (e.target.closest(".drag-handle")) return;
   if (e.target.classList.contains("t-row-check")) {
     await setTaskCompleted(t, e.target.checked);
     return;
   }
+  if (e.target.classList.contains("st-check")) {
+    await setSubtaskDone(t, e.target.dataset.st, e.target.checked);
+    return;
+  }
+  if (e.target.closest(".st-toggle")) {
+    if (state.expandedTasks.has(t.id)) state.expandedTasks.delete(t.id);
+    else state.expandedTasks.add(t.id);
+    renderTasksTab();
+    return;
+  }
+  if (tr.classList.contains("subtask-tr")) return;
   if (e.target.closest("a")) return; // let links through
   openInvestment(tr.dataset.inv);
+});
+
+/* ---------- drag to reorder ----------
+   Pointer events rather than the browser's own drag-and-drop, so it works
+   with a finger on a tablet as well as with a mouse. The row moves live
+   under the pointer; on release, the task takes its new place in the
+   whole list, and every task's sortOrder is renumbered 0, 1, 2… With a
+   filter on, the task lands next to the neighbours you dropped it between;
+   hidden tasks keep their places relative to each other. */
+const isTaskRow = (el) => el && el.classList.contains("task-tr");
+function siblingTaskRow(tr, dir) {
+  let el = dir < 0 ? tr.previousElementSibling : tr.nextElementSibling;
+  while (el && !isTaskRow(el)) el = dir < 0 ? el.previousElementSibling : el.nextElementSibling;
+  return el;
+}
+
+async function moveTask(taskId, targetId, where) {
+  if (taskId === targetId) return;
+  const list = state.tasks.slice().sort(byTeamOrder);
+  const from = list.findIndex((t) => t.id === taskId);
+  if (from === -1) return;
+  const [moved] = list.splice(from, 1);
+  let to = list.findIndex((t) => t.id === targetId);
+  if (to === -1) return;
+  if (where === "after") to++;
+  list.splice(to, 0, moved);
+
+  const changed = [];
+  list.forEach((t, n) => { if (t.sortOrder !== n) { t.sortOrder = n; changed.push(t); } });
+  renderAll();
+  if (!changed.length) return;
+
+  try {
+    // Firestore caps a batch at 500 writes.
+    for (let k = 0; k < changed.length; k += 400) {
+      const batch = writeBatch(db);
+      changed.slice(k, k + 400).forEach((t) =>
+        batch.set(doc(db, "investmentTasks", t.id), { sortOrder: t.sortOrder }, { merge: true }));
+      await batch.commit();
+    }
+  } catch (err) {
+    alert("Couldn't save the new order: " + err.message);
+    await loadTasks();
+    renderAll();
+  }
+}
+
+let drag = null;
+$("tasks-body").addEventListener("pointerdown", (e) => {
+  const handle = e.target.closest(".drag-handle");
+  if (!handle || e.button !== 0) return;
+  e.preventDefault();
+  // Sub-task previews would get in the way of rows moving as single lines.
+  $("tasks-body").querySelectorAll(".subtask-tr").forEach((row) => row.remove());
+  const tr = handle.closest("tr");
+  const next = siblingTaskRow(tr, 1);
+  drag = { tr, pointerId: e.pointerId, startNext: next ? next.dataset.id : null };
+  tr.classList.add("dragging");
+  handle.setPointerCapture(e.pointerId);
+});
+$("tasks-body").addEventListener("pointermove", (e) => {
+  if (!drag || e.pointerId !== drag.pointerId) return;
+  const body = $("tasks-body");
+  const y = e.clientY;
+  const others = [...body.querySelectorAll(".task-tr")].filter((row) => row !== drag.tr);
+  const before = others.find((row) => {
+    const b = row.getBoundingClientRect();
+    return y < b.top + b.height / 2;
+  });
+  if (before) { if (drag.tr.nextElementSibling !== before) body.insertBefore(drag.tr, before); }
+  else if (body.lastElementChild !== drag.tr) body.appendChild(drag.tr);
+  // Scroll the page when dragging near the top or bottom edge.
+  if (y < 70) window.scrollBy(0, -14);
+  else if (y > window.innerHeight - 70) window.scrollBy(0, 14);
+});
+async function endDrag(e) {
+  if (!drag || e.pointerId !== drag.pointerId) return;
+  const { tr, startNext } = drag;
+  drag = null;
+  tr.classList.remove("dragging");
+  const next = siblingTaskRow(tr, 1), prev = siblingTaskRow(tr, -1);
+  if (e.type === "pointercancel" || (next ? next.dataset.id : null) === startNext) {
+    renderTasksTab();
+    return;
+  }
+  if (next) await moveTask(tr.dataset.id, next.dataset.id, "before");
+  else if (prev) await moveTask(tr.dataset.id, prev.dataset.id, "after");
+}
+$("tasks-body").addEventListener("pointerup", endDrag);
+$("tasks-body").addEventListener("pointercancel", endDrag);
+
+// Keyboard: focus a handle and press ↑ / ↓ to move that task one place.
+$("tasks-body").addEventListener("keydown", async (e) => {
+  const handle = e.target.closest(".drag-handle");
+  if (!handle || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+  e.preventDefault();
+  const tr = handle.closest("tr");
+  const up = e.key === "ArrowUp";
+  const target = siblingTaskRow(tr, up ? -1 : 1);
+  if (!target) return;
+  await moveTask(tr.dataset.id, target.dataset.id, up ? "before" : "after");
+  const again = $("tasks-body").querySelector(`.task-tr[data-id="${CSS.escape(tr.dataset.id)}"] .drag-handle`);
+  if (again) again.focus();
 });
 
 /* ============================ schemes tab ============================ */
 function renderSchemes() {
   $("schemes-body").innerHTML = state.schemes.map((s) => {
-    const count = state.investments.filter((i) => i.schemeCode === s.code).length;
+    const count = state.investments.filter((i) => i.schemeCode === s.code && !isCirp(i)).length;
     return `<tr data-code="${esc(s.code)}">
       <td>${esc(s.name)}</td>
       <td><span class="type-tag">${esc(s.code)}</span></td>
@@ -1247,7 +1635,7 @@ $("schemes-body").addEventListener("click", async (e) => {
 
   if (isActive && !confirm(
     `Archive "${scheme.name}"?\n\n` +
-    (count ? `Its ${count} investment${count === 1 ? "" : "s"} and their tasks stay exactly as they are — nothing is deleted. ` : "") +
+    (count ? `Its investments and CIRP cases (${count} in all) and their tasks stay exactly as they are — nothing is deleted. ` : "") +
     `The scheme just disappears from the button bar and the dropdowns. You can restore it any time.`
   )) return;
 
