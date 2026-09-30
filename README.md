@@ -24,18 +24,39 @@ maintained here, in this app's own Team tab.
 - **Scheme bar** — a button per active scheme across the top (TAVASYA SSF,
   Mudrikaran Scheme II, Mudrikaran Scheme III to start with) plus "All
   schemes". Whichever is selected filters every tab underneath it, and the
-  choice is remembered between visits.
+  choice is remembered between visits. The number on each button counts
+  CIRP cases on the CIRP tab and investments everywhere else.
 - **Dashboard** — task counts by status (overdue, due this week, upcoming,
   open, completed — each clickable to filter), the number of investments,
-  their total acquisition cost and how many are still live (not exited or
-  dropped) for the selected scheme, a week-by-week "tasks due" panel you
-  can page through, and a stage breakdown.
+  their total acquisition cost, how many are still live (not exited or
+  dropped) and how many CIRP cases are in progress for the selected
+  scheme, a week-by-week "tasks due" panel you can page through, and a
+  stage breakdown. CIRP cases aren't counted in the investment figures,
+  but their tasks are counted in the task figures.
+- **CIRP** — resolution-plan cases the team is pursuing, laid out like the
+  Investments tab: a card per case showing its CIRP stage (Evaluating →
+  EOI submitted → Shortlisted → Resolution plan submitted → Plan approved
+  by CoC → Plan approved by NCLT, or Withdrawn), with the same detail view
+  and task list. CIRP-related investments start here. Once the plan is
+  approved, **Move to Investments** on the case moves it to the
+  Investments tab with its tasks. It starts there at the "Approved"
+  stage and records the date it moved. Moved one by mistake? **Back to
+  CIRP** on the investment sends it back. Everything else starts on the
+  Investments tab.
 - **Investments** — a card per investment showing stage, instrument,
-  figures, owner and an at-a-glance task summary. Click through to a full
-  detail view with every field and the complete task list.
-- **Tasks** — every task across every investment in one table, filterable
-  by status, owner and category. Tick to complete, click to jump to the
-  investment.
+  tranche, figures, owner and an at-a-glance task summary. Click through
+  to a full detail view with every field and the complete task list,
+  including each task's sub-tasks with tick boxes.
+- **Tasks** — every task across every investment and CIRP case in one
+  table, filterable by status, owner and category. Tick to complete, click
+  to jump to the investment. **Drag the ⠿ handle** to put the tasks in
+  whatever order the team wants. This works with a mouse or a finger, or
+  you can focus the handle and press ↑ / ↓. The order is saved for
+  everyone, completed tasks always sit at the bottom, and new tasks join
+  at the end. The same order is used in each investment's task list.
+  Switch the order dropdown to "By status and due date" to see the fixed
+  order instead. A task with sub-tasks shows a "2/5 sub-tasks" link that
+  opens them with tick boxes.
 - **Schemes** — add a scheme any time, or archive one without losing its
   investments.
 - **Team** — add people, set roles, remove access.
@@ -52,8 +73,10 @@ maintained here, in this app's own Team tab.
 | Scheme | Required |
 | Counterparty / corporate debtor | |
 | Instrument | Security Receipt, assigned debt, resolution plan, equity, NCD, structured credit, other |
-| Stage | Screening → IC Review → Approved → Executed → Monitoring → Exited / Dropped |
+| Stage | Screening → IC Review → Approved → Executed → Monitoring → Exit / Dropped. (Records saved when the stage was called "Exited" show as "Exit", and are saved that way the next time someone edits them.) |
+| CIRP stage | CIRP cases only — see the CIRP tab above |
 | Sector | |
+| Investment tranche | Optional. Tranche 1, 2, 3 to start with |
 | Investment date | |
 | Acquisition cost (₹ cr) | Left blank stays blank — never counted as zero |
 | Claim value (₹ cr) | Same |
@@ -63,12 +86,17 @@ maintained here, in this app's own Team tab.
 | Notes | |
 | Archived | Hides it from the default list without deleting anything |
 
+CIRP cases are stored in the same place as investments, with `track` set
+to `"cirp"`. Moving one to Investments changes `track` to `"investment"`
+and sets `movedFromCirpOn` / `movedFromCirpBy`.
+
 Adding a field later means adding its input to the investment form in
 `index.html` and reading and saving it in `app.js` (`openInvestmentDrawer`
 and the save handler just below it). Existing records don't need touching.
 
 **Every dropdown can be extended from inside the app.** Instrument, stage,
-sector, task category, priority and reminder lead time each end with a
+CIRP stage, sector, tranche, task category, priority and reminder lead
+time each end with a
 **+ Add new…** choice: pick it, type the value, and it's saved for
 everyone from then on. The lists in `config.js` are only the starting set.
 
@@ -89,6 +117,13 @@ Every task belongs to exactly one investment, and is one of two kinds:
 Plus: category, priority (Normal, High, Critical, or one you add — only
 High and Critical get a coloured tag; a custom one gets a plain tag),
 owner, CC, link, notes, and completion details.
+
+**Sub-tasks.** A task can hold any number of sub-tasks, the granular
+steps such as executing individual documents. Add, rename, tick or remove
+them in the task's edit panel. Once added, they show under the task with
+tick boxes, both in the investment's task list and in the Tasks tab. They
+don't send reminders of their own, and ticking them all doesn't
+complete the task. Tick the task itself when it's done.
 
 Each person gets **one email a day** listing every task of theirs that's
 due or overdue, not one email per task.
@@ -280,7 +315,9 @@ repo. `.gitignore` is set up to help you avoid committing it by accident.
 1. Open the live address and sign in.
 2. Pick a Scheme at the top — or leave it on "All schemes".
 3. **+ Add investment**, fill in what you know, save. Fields you leave
-   blank stay blank rather than showing as zero.
+   blank stay blank rather than showing as zero. For a resolution-plan
+   case still going through CIRP, use **+ Add CIRP case** on the CIRP
+   tab instead.
 4. Open the card you just made, then **+ Add task**. Choose **Time-bound**
    if it has a deadline you want chased, or **Open / no date** if it's just
    something to keep on the list.
@@ -296,8 +333,8 @@ repo. `.gitignore` is set up to help you avoid committing it by accident.
 | `users` | The team roster and roles. Managed from the Team tab |
 | `schemes` | The scheme list. Managed from the Schemes tab |
 | `optionLists` | Dropdown values added from inside the app via "+ Add new…" |
-| `investments` | One document per position |
-| `investmentTasks` | One document per task, linked by `investmentId`. The daily script also writes `lastReminderSent` and `reminderCount` back onto each task it emails |
+| `investments` | One document per position, and one per CIRP case (`track: "cirp"`) |
+| `investmentTasks` | One document per task, linked by `investmentId`. Sub-tasks are a `subtasks` list on the task, and its place in the team's order is `sortOrder`. The daily script also writes `lastReminderSent` and `reminderCount` back onto each task it emails |
 | `investmentReminderLog` | What the daily mail last sent (written by the script only) |
 
 Nothing else exists in this project, and the rules block everything else

@@ -88,8 +88,8 @@ service cloud.firestore {
     }
 
     // ---------- dropdown values ----------
-    // One document per dropdown (instrument, stage, sector, category,
-    // priority, leadDays), each holding a `values` array of whatever has
+    // One document per dropdown (instrument, stage, cirpStage, sector,
+    // tranche, category, priority, leadDays), each holding a `values` array of whatever has
     // been added from inside the app via "+ Add new…".
     //
     // Deliberately open to any active member, like compliance types in the
@@ -104,7 +104,8 @@ service cloud.firestore {
     }
 
     // ---------- investments ----------
-    // One document per position held by a Scheme. Auto-generated IDs: two
+    // One document per position held by a Scheme, and one per CIRP case
+    // (track == 'cirp') being pursued for one. Auto-generated IDs: two
     // investments in the same scheme can legitimately share a name (separate
     // tranches, for instance), so there's no natural composite key here.
     //
