@@ -566,9 +566,33 @@ table.ledger{ width:100%; border-collapse:collapse; font-size:13.5px }
 .ledger tbody tr.dragging .drag-handle{ cursor:grabbing }
 body:has(tr.dragging){ user-select:none; cursor:grabbing }
 
+/* ---------------- compliance page ----------------
+   The Compliance section keeps the alignment it had as a standalone app:
+   day counts right-aligned, and the tick box and edit button pushed to the
+   right of their cell. */
+.page-compliance .col-days{ text-align:right }
+.page-compliance div.row-actions{ display:flex; gap:8px; justify-content:flex-end }
+.page-compliance div.row-actions > * + *{ margin-left:0 }
+
+/* ---------------- investor form ---------------- */
+.contact-block{ display:flex; flex-direction:column; gap:12px }
+
+/* ---------------- hub (index.html) ---------------- */
+a.brand{ color:inherit; text-decoration:none }
+a.brand:hover .brand-name{ color:var(--accent) }
+.switch-link{ text-decoration:none; white-space:nowrap }
+.hub-who{ margin-left:auto }
+.hub-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px }
+.hub-card{ text-decoration:none; padding:24px 24px 18px; min-height:220px }
+.hub-card-eyebrow{ margin:0; font-family:var(--font-mono); letter-spacing:.08em }
+.hub-card-name{ font-size:24px }
+.hub-card-desc{ margin:0; flex:1; font-size:13.5px; color:var(--ink-dim); line-height:1.55 }
+
 /* ---------------- responsive ---------------- */
 @media (max-width:980px){
   .two-col{ grid-template-columns:1fr }
+  .hub-grid{ grid-template-columns:1fr }
+  .hub-card{ min-height:0 }
   .stat-row{ grid-template-columns:repeat(2,1fr) }
 }
 @media (max-width:760px){

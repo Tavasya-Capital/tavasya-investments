@@ -1,4 +1,4 @@
-name: Daily investment task reminders
+name: Daily task reminders
 
 on:
   schedule:
@@ -9,6 +9,11 @@ on:
 jobs:
   send-reminders:
     runs-on: ubuntu-latest
+    env:
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+      MS365_EMAIL: ${{ secrets.MS365_EMAIL }}
+      MS365_APP_PASSWORD: ${{ secrets.MS365_APP_PASSWORD }}
+      APP_URL: ${{ vars.APP_URL }}
     steps:
       - uses: actions/checkout@v4
 
@@ -19,10 +24,11 @@ jobs:
       - name: Install dependencies
         run: npm install firebase-admin nodemailer
 
-      - name: Send reminders
-        env:
-          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
-          MS365_EMAIL: ${{ secrets.MS365_EMAIL }}
-          MS365_APP_PASSWORD: ${{ secrets.MS365_APP_PASSWORD }}
-          APP_URL: ${{ vars.APP_URL }}
+      - name: Investments and Investor Relations reminders
         run: node scripts/send-reminders.js
+
+      # Runs even if the step above failed, so one section's problem never
+      # stops the other's emails.
+      - name: Compliance reminders
+        if: always()
+        run: node scripts/send-compliance-reminders.js

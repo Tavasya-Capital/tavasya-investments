@@ -1,28 +1,26 @@
 rules_version = '2';
 
 // ============================================================
-//  Tavasya Capital — Investments: security rules
+//  Tavasya Capital — Compliance, Investments and Investor Relations:
+//  security rules
 //
 //  Paste the whole of this file into
 //  Firebase Console → Firestore Database → Rules → Publish,
-//  on the NEW investments project.
-//
-//  This project is entirely separate from the compliance register's,
-//  so nothing here can affect that app and nothing there can affect
-//  this one. Publish this on the wrong project and you would wipe out
-//  the compliance rules — so check the project name at the top of the
-//  Firebase console before you hit Publish.
+//  on the tavasya-investments project, which all three sections use.
+//  (Not the old tavasya-compliance-a2295 project the standalone
+//  Compliance Register ran on.)
 //
 //  These rules are the ONLY thing protecting your data. The app's
 //  screens just hide buttons; the rules actually enforce who can do
 //  what, including for anyone poking at the database directly.
 //
-//  Roles:
+//  Roles (one team list for all three sections):
 //    admin    — everything, plus managing the team list, adding and
-//               archiving schemes, and deleting an investment.
-//    teamlead — everything a member can, plus deleting a task.
-//    member   — see everything; add and edit investments and tasks;
-//               cannot delete anything.
+//               archiving schemes, and deleting an investment, an
+//               investor or a compliance row.
+//    teamlead — everything a member can, plus deleting a task and a
+//               compliance type.
+//    member   — see everything; add and edit records and tasks.
 // ============================================================
 
 service cloud.firestore {
@@ -89,7 +87,9 @@ service cloud.firestore {
 
     // ---------- dropdown values ----------
     // One document per dropdown (instrument, stage, cirpStage, sector,
-    // tranche, category, priority, leadDays), each holding a `values` array of whatever has
+    // tranche, category, priority, leadDays for Investments; investorType,
+    // investorStatus, industry, investorCategory for Investor Relations),
+    // each holding a `values` array of whatever has
     // been added from inside the app via "+ Add new…".
     //
     // Deliberately open to any active member, like compliance types in the
@@ -153,6 +153,92 @@ service cloud.firestore {
     // service account and bypasses these rules entirely. Members can read
     // it to see what was last sent; nobody writes it from the browser.
     match /investmentReminderLog/{taskId} {
+      allow get, list: if isMember();
+      allow write: if false;
+    }
+
+    // ================= INVESTOR RELATIONS =================
+    // Same shape as investments and their tasks.
+
+    // ---------- investors ----------
+    // One document per investor in a Scheme. Deleting is admin-only, as a
+    // guard rail; everyone else archives instead.
+    match /investors/{investorId} {
+      allow get, list: if isMember();
+
+      allow create: if isMember()
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.schemeCode is string
+        && request.resource.data.schemeCode.size() > 0;
+
+      allow update: if isMember();
+      allow delete: if isAdmin();
+    }
+
+    // ---------- investor tasks ----------
+    // Children of an investor, linked by investorId. Same two kinds as
+    // investment tasks ('timed' emails reminders, 'open' never does).
+    match /investorTasks/{taskId} {
+      allow get, list: if isMember();
+
+      allow create: if isMember()
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.investorId is string
+        && request.resource.data.investorId.size() > 0
+        && request.resource.data.completed is bool
+        && request.resource.data.taskType in ['timed', 'open'];
+
+      allow update: if isMember();
+      allow delete: if isAdmin() || isTeamLead();
+    }
+
+    match /investorReminderLog/{taskId} {
+      allow get, list: if isMember();
+      allow write: if false;
+    }
+
+    // ================= COMPLIANCE =================
+    // Carried over unchanged from the standalone Compliance Register's
+    // rules.
+
+    // ---------- compliance types ----------
+    // Any active member can ADD one inline while filling out the compliance
+    // form. Deleting is heavier — it can silently change data other people
+    // created — so that's restricted to Admin and Team Lead.
+    match /complianceTypes/{typeId} {
+      allow get, list: if isMember();
+      allow create: if isMember();
+      allow delete: if isAdmin() || isTeamLead();
+      allow update: if false;
+    }
+
+    // ---------- compliances ----------
+    // Document ID is deterministic: `${schemeCode}-${obligationCode}-${dueDate|ONG}`,
+    // a stable, human-readable key so re-importing the same data twice
+    // overwrites in place instead of creating copies.
+    match /compliances/{complianceId} {
+      allow get, list: if isMember();
+
+      allow create: if isMember()
+        && request.resource.data.obligation is string
+        && request.resource.data.obligation.size() > 0
+        && request.resource.data.scheme is string
+        && request.resource.data.dueDate is string
+        && request.resource.data.completed is bool;
+
+      // Any member can update (mark complete, edit dates/links/notes).
+      allow update: if isMember();
+
+      // Only an admin can delete a row.
+      allow delete: if isAdmin();
+    }
+
+    // ---------- compliance reminder log ----------
+    // One doc per compliance, written by the scheduled script. Members can
+    // read it; nobody writes it from the browser.
+    match /reminderLog/{complianceId} {
       allow get, list: if isMember();
       allow write: if false;
     }

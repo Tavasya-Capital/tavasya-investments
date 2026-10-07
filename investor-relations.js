@@ -1,19 +1,14 @@
-import { ORG_DOMAIN, firebaseConfig, OPTIONS } from "./config.js";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+// The Investor Relations section. Built on the same pattern as
+// Investments: investors (like investments) each carry their own tasks,
+// with sub-tasks, reminders and the team's drag-and-drop order.
+import { ORG_DOMAIN, OPTIONS } from "./config.js";
+import { db, requireSession, signOutWithConfirm } from "./common.js";
 import {
-  getAuth, signOut, onAuthStateChanged,
-  signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  sendEmailVerification, sendPasswordResetEmail, reload
-} from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-import {
-  getFirestore, collection, doc, getDoc, getDocs, setDoc, addDoc,
+  collection, doc, getDocs, setDoc, addDoc,
   deleteDoc, serverTimestamp, writeBatch, arrayUnion
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
 /* ============================ setup ============================ */
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
 
 const $ = (id) => document.getElementById(id);
 
@@ -22,11 +17,11 @@ const state = {
   profile: null,
   team: [],
   schemes: [],
-  investments: [],
+  investors: [],
   tasks: [],
   optionLists: {},           // dropdown values added from inside the app
   schemeFilter: "",          // "" = all schemes; otherwise a scheme code
-  openInvestmentId: null,    // non-null when the detail view is showing
+  openInvestorId: null,    // non-null when the detail view is showing
   showDoneTasks: false,
   dashStatusFilter: "",
   weekOffset: 0,
@@ -39,13 +34,7 @@ const isTeamLead = () => state.profile && state.profile.role === "teamlead";
 const canDeleteTask = () => isAdmin() || isTeamLead();
 
 const SCHEME_KEY = "tavasya-inv-scheme";
-const TASK_SORT_KEY = "tavasya-inv-task-sort";
-
-// CIRP cases are investment records with track "cirp". They show on the
-// CIRP tab only, until "Move to Investments" sets track back to
-// "investment". Records saved before the CIRP tab existed have no track at
-// all, and count as investments.
-const isCirp = (i) => !!i && i.track === "cirp";
+const TASK_SORT_KEY = "tavasya-ir-task-sort";
 
 /* ============================ theme ============================ */
 const THEME_KEY = "tavasya-theme";
@@ -92,6 +81,7 @@ const fmtCr = (n) =>
     ? "—"
     : Number(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+const isNum = (v) => v !== null && v !== undefined && v !== "" && !isNaN(v);
 const sumCr = (arr, key) => {
   const vals = arr.map((x) => x[key]).filter((v) => v !== null && v !== undefined && v !== "" && !isNaN(v));
   return vals.length ? vals.reduce((a, b) => a + Number(b), 0) : null;
@@ -159,133 +149,22 @@ const personName = (email) => {
 };
 const roleLabel = (r) => (r === "admin" ? "Admin" : r === "teamlead" ? "Team Lead" : "Member");
 
-/* ============================ view switching ============================ */
-function showView(id) {
-  ["view-auth", "view-verify", "view-notsetup", "view-app"].forEach((v) => { $(v).hidden = v !== id; });
-}
+/* ============================ sign-in ============================
+   Signing in happens on index.html. This page just waits for the session
+   and sends anyone without one back there. */
+$("btn-signout").addEventListener("click", signOutWithConfirm);
 
-/* ============================ auth ============================ */
-function authMessage(e) {
-  const map = {
-    "auth/invalid-email": "That doesn't look like a valid email address.",
-    "auth/wrong-password": "That password doesn't match. Use 'Set or reset my password' if you've forgotten it.",
-    "auth/invalid-credential": "That email and password don't match. Use 'Set or reset my password' if you've forgotten it.",
-    "auth/too-many-requests": "Too many tries. Wait a few minutes and try again.",
-    "auth/weak-password": "Passwords need at least six characters.",
-    "auth/email-already-in-use": "That password doesn't match. Use 'Set or reset my password' if you've forgotten it.",
-    "auth/operation-not-allowed": "Password sign-in isn't switched on for this project yet.",
-    "auth/network-request-failed": "Couldn't reach the server. Check your connection."
-  };
-  return map[e.code] || e.message || "Something went wrong. Try again.";
-}
-
-$("form-auth").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const email = $("auth-email").value.trim().toLowerCase();
-  const password = $("auth-password").value;
-  const err = $("auth-error");
-  err.hidden = true;
-
-  if (!email.endsWith("@" + ORG_DOMAIN)) {
-    err.textContent = `Use your @${ORG_DOMAIN} account.`;
-    err.hidden = false;
-    return;
-  }
-  if (!password) {
-    err.textContent = "Enter your password.";
-    err.hidden = false;
-    return;
-  }
-
-  $("btn-auth").disabled = true;
-  try {
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (e1) {
-      // Firebase's email-enumeration protection means a wrong password on
-      // an EXISTING account throws the same code as a brand-new email
-      // would. The only way to tell them apart is to attempt creation and
-      // see which way it fails.
-      if (["auth/user-not-found", "auth/invalid-credential"].includes(e1.code)) {
-        try {
-          const cred = await createUserWithEmailAndPassword(auth, email, password);
-          await sendEmailVerification(cred.user);
-        } catch (e3) {
-          if (e3.code === "auth/email-already-in-use") {
-            err.textContent = "That password doesn't match. Use 'Set or reset my password' if you've forgotten it.";
-          } else {
-            err.textContent = authMessage(e3);
-          }
-          err.hidden = false;
-        }
-      } else {
-        throw e1;
-      }
-    }
-  } catch (e2) {
-    err.textContent = authMessage(e2);
-    err.hidden = false;
-  } finally {
-    $("btn-auth").disabled = false;
-  }
+requireSession("investor-relations").then(({ user, profile }) => {
+  state.user = user;
+  state.profile = profile;
+  boot();
 });
-
-$("btn-reset").addEventListener("click", async () => {
-  const email = $("auth-email").value.trim().toLowerCase();
-  const err = $("auth-error");
-  if (!email) { err.textContent = "Enter your email first, then tap this again."; err.hidden = false; return; }
-  try {
-    await sendPasswordResetEmail(auth, email);
-    err.textContent = "Reset link sent — check your inbox.";
-  } catch (e) {
-    err.textContent = e.message || "Couldn't send that.";
-  }
-  err.hidden = false;
-});
-
-const doSignOut = () => { if (confirm("Sign out of Tavasya Capital Investments?")) signOut(auth); };
-$("btn-reload").addEventListener("click", async () => { await reload(auth.currentUser); boot(); });
-$("btn-signout-verify").addEventListener("click", doSignOut);
-$("btn-signout-notsetup").addEventListener("click", doSignOut);
-$("btn-signout").addEventListener("click", doSignOut);
-
-onAuthStateChanged(auth, () => boot());
 
 async function boot() {
-  $("boot-splash").hidden = true;
-
-  const user = auth.currentUser;
-  if (!user) { state.user = null; state.profile = null; showView("view-auth"); return; }
-  state.user = user;
-
-  const email = (user.email || "").toLowerCase();
-  if (!email.endsWith("@" + ORG_DOMAIN)) {
-    await signOut(auth);
-    const err = $("auth-error");
-    err.textContent = `Use your @${ORG_DOMAIN} account. ${email} isn't on that domain.`;
-    err.hidden = false;
-    showView("view-auth");
-    return;
-  }
-
-  if (!user.emailVerified) {
-    $("verify-email").textContent = user.email;
-    showView("view-verify");
-    return;
-  }
-
-  // The team list is shared with the Compliance Register — same document,
-  // same roles. Nobody has to be set up twice.
-  const snap = await getDoc(doc(db, "users", email));
-  if (!snap.exists() || snap.data().active !== true) {
-    $("notsetup-email").textContent = user.email;
-    showView("view-notsetup");
-    return;
-  }
-  state.profile = snap.data();
+  const user = state.user;
   $("who-name").textContent = `${state.profile.name || user.email} · ${roleLabel(state.profile.role)}`;
 
-  await Promise.all([loadTeam(), loadSchemes(), loadInvestments(), loadTasks(), loadOptionLists()]);
+  await Promise.all([loadTeam(), loadSchemes(), loadInvestors(), loadTasks(), loadOptionLists()]);
   await ensureDefaultSchemes();
 
   $("btn-add-person").hidden = !isAdmin();
@@ -301,7 +180,8 @@ async function boot() {
   populateSelects();
   renderSchemePills();
   renderAll();
-  showView("view-app");
+  $("boot-splash").hidden = true;
+  $("view-app").hidden = false;
 }
 
 /* ============================ data loading ============================ */
@@ -341,17 +221,13 @@ async function ensureDefaultSchemes() {
   await batch.commit();
   await loadSchemes();
 }
-async function loadInvestments() {
-  const snap = await getDocs(collection(db, "investments"));
-  state.investments = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-    // The "Exited" stage was renamed "Exit". Records saved before that still
-    // say "Exited" until someone next saves them, so read them as "Exit";
-    // otherwise both would show up as separate stages.
-    .map((i) => (i.stage === "Exited" ? { ...i, stage: "Exit" } : i))
+async function loadInvestors() {
+  const snap = await getDocs(collection(db, "investors"));
+  state.investors = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 }
 async function loadTasks() {
-  const snap = await getDocs(collection(db, "investmentTasks"));
+  const snap = await getDocs(collection(db, "investorTasks"));
   state.tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 async function loadOptionLists() {
@@ -380,13 +256,14 @@ async function loadOptionLists() {
 const ADD_NEW = "__add_new__";
 
 const OPTION_FIELDS = {
-  instrument: { noun: "instrument", seed: () => OPTIONS.instruments,    used: () => state.investments.map((i) => i.instrument) },
-  stage:      { noun: "stage",      seed: () => OPTIONS.stages,         used: () => state.investments.map((i) => i.stage) },
-  cirpStage:  { noun: "CIRP stage", seed: () => OPTIONS.cirpStages || [], used: () => state.investments.map((i) => i.cirpStage) },
-  tranche:    { noun: "tranche",    seed: () => OPTIONS.tranches || [], used: () => state.investments.map((i) => i.tranche) },
-  sector:     { noun: "sector",     seed: () => OPTIONS.sectors,        used: () => state.investments.map((i) => i.sector) },
-  category:   { noun: "category",   seed: () => OPTIONS.taskCategories, used: () => state.tasks.map((t) => t.category) },
-  priority:   { noun: "priority",   seed: () => OPTIONS.priorities,     used: () => state.tasks.map((t) => t.priority) }
+  investorType:   { noun: "type",     seed: () => OPTIONS.investorTypes || [],          used: () => state.investors.map((i) => i.investorType) },
+  investorStatus: { noun: "status",   seed: () => OPTIONS.investorStatuses || [],       used: () => state.investors.map((i) => i.status) },
+  industry:       { noun: "industry", seed: () => OPTIONS.investorIndustries || [],     used: () => state.investors.map((i) => i.industry) },
+  // Kept apart from the Investments task categories (key "category"), so
+  // a category added on one side doesn't appear on the other. Priorities
+  // and reminder lead times are shared.
+  investorCategory: { noun: "category", seed: () => OPTIONS.investorTaskCategories || [], used: () => state.tasks.map((t) => t.category) },
+  priority:       { noun: "priority", seed: () => OPTIONS.priorities,                   used: () => state.tasks.map((t) => t.priority) }
 };
 
 function optionsFor(key) {
@@ -483,17 +360,17 @@ function wireAddNewLeadDays() {
   });
 }
 
-["i-instrument", "i-stage", "i-sector"].forEach((id, n) => wireAddNew(id, ["instrument", "stage", "sector"][n]));
-wireAddNew("i-cirp-stage", "cirpStage");
-wireAddNew("i-tranche", "tranche");
-wireAddNew("t-category", "category");
+wireAddNew("i-type", "investorType");
+wireAddNew("i-status", "investorStatus");
+wireAddNew("i-industry", "industry");
+wireAddNew("t-category", "investorCategory");
 wireAddNew("t-priority", "priority");
 wireAddNewLeadDays();
 
 /* ============================ shared selects ============================ */
 const SELECT_IDS = [
-  "i-scheme", "i-instrument", "i-stage", "i-cirp-stage", "i-sector", "i-tranche", "i-owner",
-  "f-inv-stage", "f-inv-instrument", "f-cirp-stage",
+  "i-scheme", "i-type", "i-status", "i-industry", "i-owner",
+  "f-inv-status", "f-inv-type",
   "t-lead", "t-category", "t-priority", "t-owner", "t-cc",
   "f-task-owner", "f-task-category"
 ];
@@ -518,23 +395,20 @@ function populateSelects() {
   $("t-owner").innerHTML = '<option value="">Unassigned</option>' + people;
   $("t-cc").innerHTML = '<option value="">None</option>' + people;
 
-  $("i-instrument").innerHTML = '<option value="">—</option>' + list("instrument") + addNew;
-  $("i-stage").innerHTML = list("stage") + addNew;
-  $("i-sector").innerHTML = '<option value="">—</option>' + list("sector") + addNew;
-  $("i-cirp-stage").innerHTML = list("cirpStage") + addNew;
-  $("i-tranche").innerHTML = '<option value="">—</option>' + list("tranche") + addNew;
-  $("t-category").innerHTML = '<option value="">—</option>' + list("category") + addNew;
+  $("i-type").innerHTML = '<option value="">—</option>' + list("investorType") + addNew;
+  $("i-status").innerHTML = list("investorStatus") + addNew;
+  $("i-industry").innerHTML = '<option value="">—</option>' + list("industry") + addNew;
+  $("t-category").innerHTML = '<option value="">—</option>' + list("investorCategory") + addNew;
   $("t-priority").innerHTML = list("priority") + addNew;
   $("t-lead").innerHTML = leadDayOptions()
     .map((d) => `<option value="${d}">${d} day${d === 1 ? "" : "s"} before</option>`).join("") + addNew;
 
   // Filters list the same values but never offer to add one — you can only
   // filter by something that exists.
-  $("f-inv-stage").innerHTML = '<option value="">All stages</option>' + list("stage");
-  $("f-inv-instrument").innerHTML = '<option value="">All instruments</option>' + list("instrument");
-  $("f-cirp-stage").innerHTML = '<option value="">All CIRP stages</option>' + list("cirpStage");
+  $("f-inv-status").innerHTML = '<option value="">All statuses</option>' + list("investorStatus");
+  $("f-inv-type").innerHTML = '<option value="">All types</option>' + list("investorType");
   $("f-task-owner").innerHTML = '<option value="">All owners</option><option value="__none__">Unassigned</option>' + people;
-  $("f-task-category").innerHTML = '<option value="">All categories</option>' + list("category");
+  $("f-task-category").innerHTML = '<option value="">All categories</option>' + list("investorCategory");
 
   SELECT_IDS.forEach((id) => {
     const sel = $(id);
@@ -546,10 +420,7 @@ function populateSelects() {
 
 /* ============================ scheme pills ============================ */
 function renderSchemePills() {
-  // The numbers count CIRP cases on the CIRP tab, and investments everywhere else.
-  const onCirp = (document.querySelector(".tab.active") || {}).dataset?.tab === "cirp";
-  const counts = (code) => state.investments.filter((i) =>
-    !i.archived && isCirp(i) === onCirp && (!code || i.schemeCode === code)).length;
+  const counts = (code) => state.investors.filter((i) => !i.archived && (!code || i.schemeCode === code)).length;
   const pill = (code, label) => `
     <button class="scheme-pill${state.schemeFilter === code ? " active" : ""}" data-code="${esc(code)}">
       ${esc(label)}<span class="pill-count">${counts(code)}</span>
@@ -564,10 +435,10 @@ $("scheme-pills").addEventListener("click", (e) => {
   state.schemeFilter = btn.dataset.code;
   try { localStorage.setItem(SCHEME_KEY, state.schemeFilter); } catch (err) {}
   // Switching scheme while a detail view is open would be disorienting —
-  // drop back to the list of that scheme's investments instead.
-  if (state.openInvestmentId) {
-    const inv = investmentById(state.openInvestmentId);
-    if (inv && state.schemeFilter && inv.schemeCode !== state.schemeFilter) state.openInvestmentId = null;
+  // drop back to the list of that scheme's investors instead.
+  if (state.openInvestorId) {
+    const inv = investorById(state.openInvestorId);
+    if (inv && state.schemeFilter && inv.schemeCode !== state.schemeFilter) state.openInvestorId = null;
   }
   renderSchemePills();
   renderAll();
@@ -592,22 +463,22 @@ const goToTab = (name) => {
 };
 
 /* ============================ scoped data ============================ */
-const investmentById = (id) => state.investments.find((i) => i.id === id);
+const investorById = (id) => state.investors.find((i) => i.id === id);
 
-function scopedInvestments() {
+function scopedInvestors() {
   return state.schemeFilter
-    ? state.investments.filter((i) => i.schemeCode === state.schemeFilter)
-    : state.investments.slice();
+    ? state.investors.filter((i) => i.schemeCode === state.schemeFilter)
+    : state.investors.slice();
 }
 function scopedTasks() {
-  const ids = new Set(scopedInvestments().filter((i) => !i.archived).map((i) => i.id));
-  return state.tasks.filter((t) => ids.has(t.investmentId));
+  const ids = new Set(scopedInvestors().filter((i) => !i.archived).map((i) => i.id));
+  return state.tasks.filter((t) => ids.has(t.investorId));
 }
-const tasksFor = (invId) => state.tasks.filter((t) => t.investmentId === invId);
+const tasksFor = (invId) => state.tasks.filter((t) => t.investorId === invId);
 
 function renderAll() {
   renderDashboard();
-  renderTrackTabs();
+  renderInvestorsTab();
   renderTasksTab();
   renderSchemes();
   renderTeam();
@@ -615,11 +486,7 @@ function renderAll() {
 
 /* ============================ dashboard ============================ */
 function renderDashboard() {
-  // The investment figures leave CIRP cases out: they aren't positions yet.
-  // Their tasks still count in the task figures, since that's real work.
-  const live = scopedInvestments().filter((i) => !i.archived);
-  const invs = live.filter((i) => !isCirp(i));
-  const cirp = live.filter(isCirp);
+  const invs = scopedInvestors().filter((i) => !i.archived);
   const tasks = scopedTasks();
 
   $("hero-eyebrow").textContent = currentSchemeName();
@@ -631,32 +498,38 @@ function renderDashboard() {
   $("k-open").textContent = by("OPEN");
   $("k-done").textContent = by("DONE");
 
-  $("s-investments").textContent = invs.length;
-  $("s-deployed").textContent = fmtCr(sumCr(invs, "acquisitionCost"));
-  $("s-live").textContent = invs.filter((i) => !["Exit", "Dropped"].includes(i.stage)).length;
-  $("s-cirp").textContent = cirp.filter((i) => !/withdrawn/i.test(i.cirpStage || "")).length;
+  // Undrawn only counts investors where both figures are known; a blank is
+  // "not known yet", not zero.
+  const committed = sumCr(invs, "committedAmount");
+  const drawn = sumCr(invs, "drawdownAmount");
+  const both = invs.filter((i) => isNum(i.committedAmount) && isNum(i.drawdownAmount));
+  $("s-investors").textContent = invs.length;
+  $("s-committed").textContent = fmtCr(committed);
+  $("s-drawn").textContent = fmtCr(drawn);
+  $("s-undrawn").textContent = both.length
+    ? fmtCr(both.reduce((n, i) => n + Number(i.committedAmount) - Number(i.drawdownAmount), 0))
+    : fmtCr(null);
 
   const overdue = by("OVERDUE");
   const soon = by("DUE SOON");
-  const across = `<strong>${invs.length}</strong> investment${invs.length === 1 ? "" : "s"}` +
-    (cirp.length ? ` and <strong>${cirp.length}</strong> CIRP case${cirp.length === 1 ? "" : "s"}` : "");
-  $("dm-caption").innerHTML = live.length === 0
-    ? `Nothing here yet — add the first investment or CIRP case under <strong>${esc(currentSchemeName())}</strong> to get started.`
+  const across = `<strong>${invs.length}</strong> investor${invs.length === 1 ? "" : "s"}`;
+  $("dm-caption").innerHTML = invs.length === 0
+    ? `Nothing here yet — add the first investor under <strong>${esc(currentSchemeName())}</strong> to get started.`
     : overdue
       ? `<strong>${overdue}</strong> task${overdue === 1 ? "" : "s"} overdue across ${across}${soon ? `, and ${soon} more due this week` : ""}.`
       : soon
         ? `Nothing overdue. <strong>${soon}</strong> task${soon === 1 ? "" : "s"} due this week across ${across}.`
         : `Nothing overdue or due this week across ${across}.`;
 
-  renderStageBreakdown(invs);
+  renderStatusBreakdown(invs);
   renderWeeklyPanel();
 }
 
-function renderStageBreakdown(invs) {
-  const stages = optionsFor("stage");
-  const max = Math.max(1, ...stages.map((s) => invs.filter((i) => i.stage === s).length));
-  $("stage-breakdown").innerHTML = stages.map((s) => {
-    const n = invs.filter((i) => i.stage === s).length;
+function renderStatusBreakdown(invs) {
+  const statuses = optionsFor("investorStatus");
+  const max = Math.max(1, ...statuses.map((s) => invs.filter((i) => i.status === s).length));
+  $("stage-breakdown").innerHTML = statuses.map((s) => {
+    const n = invs.filter((i) => i.status === s).length;
     return `<div class="stage-row">
       <span class="stage-name">${esc(s)}</span>
       <span class="stage-bar"><span class="stage-bar-fill" style="width:${(n / max) * 100}%"></span></span>
@@ -695,9 +568,9 @@ $("kpi-strip").addEventListener("click", (e) => {
 });
 
 function taskItemHtml(t) {
-  const inv = investmentById(t.investmentId);
+  const inv = investorById(t.investorId);
   const s = taskStatus(t);
-  return `<div class="wk-item clickable" data-task="${esc(t.id)}" data-inv="${esc(t.investmentId)}">
+  return `<div class="wk-item clickable" data-task="${esc(t.id)}" data-inv="${esc(t.investorId)}">
     <span class="wk-date">${t.dueDate ? fmtDay(t.dueDate).slice(0, 6) : "—"}</span>
     <span class="wk-name">${esc(t.title)}${t.completed ? '<span class="wk-done">✓</span>' : ""}
       <span class="wk-meta" style="display:block">${esc(inv ? inv.name : "—")}${t.ownerEmail ? " · " + esc(personName(t.ownerEmail)) : ""}</span>
@@ -746,98 +619,62 @@ function renderWeeklyPanel() {
     : `<p class="empty-note">Nothing due ${state.weekOffset === 0 ? "this week" : "that week"}.</p>`;
 }
 
-// Clicking any task anywhere on the dashboard opens its investment.
+// Clicking any task anywhere on the dashboard opens its investor.
 document.querySelectorAll("#overdue-list, #due-this-week").forEach((el) => {
   el.addEventListener("click", (e) => {
     const row = e.target.closest("[data-inv]");
     if (!row) return;
-    openInvestment(row.dataset.inv);
+    openInvestor(row.dataset.inv);
   });
 });
 
-/* ============================ investments & CIRP tabs ============================
-   Both tabs list investment records as cards. The CIRP tab shows the ones
-   with track "cirp", the Investments tab shows everything else. They share
-   one detail view (#inv-detail-view), which is moved into whichever tab
-   the open record belongs to.
-   ============================================================================ */
-const TRACKS = {
-  investments: {
-    cirp: false, list: "inv-list-view", grid: "inv-grid", empty: "inv-empty",
-    slot: "inv-detail-slot", title: "inv-list-title", heading: "Investments",
-    search: "f-inv-search", stage: "f-inv-stage", instrument: "f-inv-instrument", archived: "f-inv-archived"
-  },
-  cirp: {
-    cirp: true, list: "cirp-list-view", grid: "cirp-grid", empty: "cirp-empty",
-    slot: "cirp-detail-slot", title: "cirp-list-title", heading: "CIRP",
-    search: "f-cirp-search", stage: "f-cirp-stage", instrument: null, archived: "f-cirp-archived"
-  }
-};
-const trackKeyOf = (i) => (isCirp(i) ? "cirp" : "investments");
+/* ============================ investors tab ============================ */
+["f-inv-search", "f-inv-status", "f-inv-type", "f-inv-archived"]
+  .forEach((id) => $(id).addEventListener(id === "f-inv-search" ? "input" : "change", renderInvestorsTab));
 
-// What the stage badge says, and how it's coloured. CIRP stages are free
-// text people can add to, so they're coloured by what they say rather than
-// by a fixed list.
-const stageLabel = (i) => (isCirp(i) ? i.cirpStage || "Evaluating" : i.stage || "Screening");
-function stageBadgeClass(i) {
-  if (!isCirp(i)) return `badge-${statusClass(stageLabel(i))}`;
-  const s = stageLabel(i).toLowerCase();
-  if (/approved/.test(s)) return "badge-DONE";
-  if (/withdrawn|rejected|dropped/.test(s)) return "badge-ONGOING";
-  if (/submitted|shortlisted/.test(s)) return "badge-DUESOON";
+const statusLabel = (i) => i.status || "Prospect";
+// Statuses are free text people can add to, so they're coloured by what
+// they say rather than by a fixed list.
+function statusBadgeClass(i) {
+  const s = statusLabel(i).toLowerCase();
+  if (/onboarded|active|invested/.test(s)) return "badge-DONE";
+  if (/committed/.test(s)) return "badge-DUESOON";
+  if (/exited|redeemed|withdrawn|dropped|lost/.test(s)) return "badge-ONGOING";
   return "badge-UPCOMING";
 }
 
-Object.entries(TRACKS).forEach(([key, T]) => {
-  [T.search, T.stage, T.instrument, T.archived].filter(Boolean)
-    .forEach((id) => $(id).addEventListener(id === T.search ? "input" : "change", () => renderTrackTab(key)));
-  $(T.grid).addEventListener("click", (e) => {
-    const card = e.target.closest(".inv-card");
-    if (card) openInvestment(card.dataset.id);
-  });
-});
-
-function renderTrackTabs() {
-  if (state.openInvestmentId && !investmentById(state.openInvestmentId)) state.openInvestmentId = null;
-  renderTrackTab("cirp");
-  renderTrackTab("investments");
-}
-
-function renderTrackTab(key) {
-  const T = TRACKS[key];
-  const detail = $("inv-detail-view");
-  const open = investmentById(state.openInvestmentId);
-  if (open && trackKeyOf(open) === key) {
-    if (detail.parentElement !== $(T.slot)) $(T.slot).appendChild(detail);
-    $(T.list).hidden = true;
-    detail.hidden = false;
-    renderInvestmentDetail();
+function renderInvestorsTab() {
+  if (state.openInvestorId && investorById(state.openInvestorId)) {
+    $("inv-list-view").hidden = true;
+    $("inv-detail-view").hidden = false;
+    renderInvestorDetail();
     return;
   }
-  $(T.list).hidden = false;
-  if (detail.parentElement === $(T.slot)) detail.hidden = true;
+  state.openInvestorId = null;
+  $("inv-list-view").hidden = false;
+  $("inv-detail-view").hidden = true;
 
-  $(T.title).textContent =
-    state.schemeFilter ? `${T.heading} — ${currentSchemeName()}` : `${T.heading} — all schemes`;
+  $("inv-list-title").textContent =
+    state.schemeFilter ? `Investors — ${currentSchemeName()}` : "Investors — all schemes";
 
-  const q = $(T.search).value.trim().toLowerCase();
-  const stage = $(T.stage).value;
-  const instrument = T.instrument ? $(T.instrument).value : "";
-  const arch = $(T.archived).value;
+  const q = $("f-inv-search").value.trim().toLowerCase();
+  const status = $("f-inv-status").value;
+  const type = $("f-inv-type").value;
+  const arch = $("f-inv-archived").value;
 
-  let rows = scopedInvestments().filter((i) => isCirp(i) === T.cirp);
+  let rows = scopedInvestors();
   if (arch === "live") rows = rows.filter((i) => !i.archived);
   else if (arch === "archived") rows = rows.filter((i) => i.archived);
-  if (stage) rows = rows.filter((i) => stageLabel(i) === stage);
-  if (instrument) rows = rows.filter((i) => i.instrument === instrument);
+  if (status) rows = rows.filter((i) => statusLabel(i) === status);
+  if (type) rows = rows.filter((i) => i.investorType === type);
   if (q) {
     rows = rows.filter((i) =>
-      [i.name, i.counterparty, i.sector, i.ncltRef, i.notes, i.instrument, i.tranche]
+      [i.name, i.investorType, i.industry, i.contactName, i.contactEmail, i.contactPhone, i.notes]
         .some((v) => String(v || "").toLowerCase().includes(q)));
   }
 
-  $(T.empty).hidden = rows.length > 0;
-  $(T.grid).innerHTML = rows.map(cardHtml).join("");
+  $("inv-empty").hidden = rows.length > 0;
+  $("inv-grid").innerHTML = rows.map(cardHtml).join("");
 }
 
 function cardHtml(i) {
@@ -861,85 +698,74 @@ function cardHtml(i) {
     <div class="inv-card-top">
       <div>
         <p class="inv-card-name">${esc(i.name)}</p>
-        ${i.counterparty ? `<p class="inv-card-counterparty">${esc(i.counterparty)}</p>` : ""}
+        ${i.contactName ? `<p class="inv-card-counterparty">${esc(i.contactName)}</p>` : ""}
       </div>
-      <span class="badge ${stageBadgeClass(i)}">${esc(stageLabel(i))}</span>
+      <span class="badge ${statusBadgeClass(i)}">${esc(statusLabel(i))}</span>
     </div>
     <div class="inv-card-meta">
-      ${i.instrument ? `<span class="type-tag">${esc(i.instrument)}</span>` : ""}
-      ${i.tranche ? `<span class="type-tag">${esc(i.tranche)}</span>` : ""}
-      ${i.sector ? `<span class="type-tag">${esc(i.sector)}</span>` : ""}
+      ${i.investorType ? `<span class="type-tag">${esc(i.investorType)}</span>` : ""}
+      ${i.industry ? `<span class="type-tag">${esc(i.industry)}</span>` : ""}
       ${!state.schemeFilter ? `<span class="type-tag">${esc(i.schemeName || i.schemeCode || "")}</span>` : ""}
     </div>
     <div class="inv-card-figures">
-      <span><span class="inv-fig-label">Acq. cost</span><span class="inv-fig-value">${fmtCr(i.acquisitionCost)}</span></span>
-      <span><span class="inv-fig-label">Claim value</span><span class="inv-fig-value">${fmtCr(i.faceValue)}</span></span>
+      <span><span class="inv-fig-label">Committed</span><span class="inv-fig-value">${fmtCr(i.committedAmount)}</span></span>
+      <span><span class="inv-fig-label">Drawn down</span><span class="inv-fig-value">${fmtCr(i.drawdownAmount)}</span></span>
       <span><span class="inv-fig-label">Owner</span><span class="inv-fig-value" style="font-family:inherit">${esc(personName(i.ownerEmail))}</span></span>
     </div>
     <div class="inv-card-tasks">${taskLine}</div>
   </button>`;
 }
 
+$("inv-grid").addEventListener("click", (e) => {
+  const card = e.target.closest(".inv-card");
+  if (card) openInvestor(card.dataset.id);
+});
 $("btn-back-to-list").addEventListener("click", () => {
-  state.openInvestmentId = null;
-  renderTrackTabs();
+  state.openInvestorId = null;
+  renderInvestorsTab();
 });
 
-function openInvestment(id) {
-  const i = investmentById(id);
-  if (!i) return;
-  state.openInvestmentId = id;
-  goToTab(trackKeyOf(i));
-  renderTrackTabs();
+function openInvestor(id) {
+  if (!investorById(id)) return;
+  state.openInvestorId = id;
+  goToTab("investors");
+  renderInvestorsTab();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-/* ============================ investment detail ============================ */
+/* ============================ investor detail ============================ */
 $("dv-show-done").addEventListener("change", () => {
   state.showDoneTasks = $("dv-show-done").checked;
-  renderInvestmentDetail();
+  renderInvestorDetail();
 });
 
-function renderInvestmentDetail() {
-  const i = investmentById(state.openInvestmentId);
-  if (!i) { state.openInvestmentId = null; renderTrackTabs(); return; }
-  const cirp = isCirp(i);
+function renderInvestorDetail() {
+  const i = investorById(state.openInvestorId);
+  if (!i) { state.openInvestorId = null; renderInvestorsTab(); return; }
 
-  $("btn-back-to-list").textContent = cirp ? "← All CIRP cases" : "← All investments";
-  $("dv-scheme").textContent = (i.schemeName || i.schemeCode || "") + (cirp ? " · CIRP" : "");
+  $("dv-scheme").textContent = i.schemeName || i.schemeCode || "";
   $("dv-name").textContent = i.name;
-  $("dv-subline").textContent = [i.counterparty, i.instrument, i.tranche, i.sector].filter(Boolean).join(" · ") || "—";
-  $("dv-stage").className = `badge ${stageBadgeClass(i)}`;
-  $("dv-stage").textContent = stageLabel(i);
-
-  // A CIRP case can be moved to Investments at any point, and a record that
-  // came from CIRP can be sent back, in case it was moved by mistake.
-  const move = $("btn-move-track");
-  move.hidden = !cirp && !i.movedFromCirpOn;
-  move.textContent = cirp ? "Move to Investments →" : "↩ Back to CIRP";
-  move.classList.toggle("btn-primary", cirp);
+  $("dv-subline").textContent = [i.investorType, i.industry].filter(Boolean).join(" · ") || "—";
+  $("dv-stage").className = `badge ${statusBadgeClass(i)}`;
+  $("dv-stage").textContent = statusLabel(i);
 
   const fact = (label, value, cls = "") =>
     `<div class="fact"><p class="fact-label">${esc(label)}</p><p class="fact-value ${cls}">${value}</p></div>`;
   const plain = (v) => v ? esc(v) : '<span class="muted">—</span>';
-
-  // A blank amount shows as a plain dash, not "₹ — cr", which reads like a
-  // broken template rather than "we don't know this yet".
-  const money = (v) => (v === null || v === undefined || v === "" || isNaN(v))
-    ? '<span class="muted">—</span>'
-    : `₹ ${fmtCr(v)} cr`;
+  const money = (v) => isNum(v) ? `₹ ${fmtCr(v)} cr` : '<span class="muted">—</span>';
+  const undrawn = isNum(i.committedAmount) && isNum(i.drawdownAmount)
+    ? Number(i.committedAmount) - Number(i.drawdownAmount) : null;
 
   $("dv-facts").innerHTML =
-    fact("Acquisition cost", money(i.acquisitionCost), "mono") +
-    fact("Claim value", money(i.faceValue), "mono") +
-    fact("Investment date", i.investmentDate ? fmtDay(i.investmentDate) : '<span class="muted">—</span>', "mono") +
-    fact("Owner", plain(i.ownerEmail ? personName(i.ownerEmail) : "")) +
-    fact("Investment tranche", plain(i.tranche)) +
-    fact("NCLT / CIRP reference", plain(i.ncltRef)) +
-    (!cirp && i.movedFromCirpOn
-      ? fact("Came from CIRP", `${fmtDay(i.movedFromCirpOn)}${i.cirpStage ? ` · ${esc(i.cirpStage)}` : ""}`)
-      : "") +
+    fact("Committed", money(i.committedAmount), "mono") +
+    fact("Drawn down", money(i.drawdownAmount), "mono") +
+    fact("Undrawn", money(undrawn), "mono") +
+    fact("Relationship owner", plain(i.ownerEmail ? personName(i.ownerEmail) : "")) +
+    fact("Point of contact", plain(i.contactName)) +
+    fact("Email", i.contactEmail ? `<a href="mailto:${esc(i.contactEmail)}">${esc(i.contactEmail)}</a>` : '<span class="muted">—</span>') +
+    fact("Phone", i.contactPhone ? `<a href="tel:${esc(i.contactPhone.replace(/\s/g, ""))}">${esc(i.contactPhone)}</a>` : '<span class="muted">—</span>') +
     fact("Document link", i.docLink ? `<a href="${esc(i.docLink)}" target="_blank" rel="noopener">Open</a>` : '<span class="muted">—</span>') +
+    (i.contactOther ? `<div class="fact wide"><p class="fact-label">Other contact details</p><p class="fact-value">${esc(i.contactOther)}</p></div>` : "") +
     (i.archived ? fact("Status", '<span class="badge badge-ONGOING">Archived</span>') : "") +
     (i.notes ? `<div class="fact wide"><p class="fact-label">Notes</p><p class="fact-value">${esc(i.notes).replace(/\n/g, "<br>")}</p></div>` : "");
 
@@ -1002,7 +828,7 @@ $("dv-tasks").addEventListener("click", async (e) => {
     await setSubtaskDone(t, e.target.dataset.st, e.target.checked);
     return;
   }
-  if (e.target.closest(".t-edit")) openTaskDrawer(t.investmentId, t);
+  if (e.target.closest(".t-edit")) openTaskDrawer(t.investorId, t);
 });
 
 async function setSubtaskDone(t, subtaskId, done) {
@@ -1010,7 +836,7 @@ async function setSubtaskDone(t, subtaskId, done) {
     ...st, done, doneOn: done ? todayISO() : "", doneBy: done ? state.user.email : ""
   });
   try {
-    await setDoc(doc(db, "investmentTasks", t.id), {
+    await setDoc(doc(db, "investorTasks", t.id), {
       subtasks, updatedAt: serverTimestamp(), updatedBy: state.user.email
     }, { merge: true });
     t.subtasks = subtasks;
@@ -1022,7 +848,7 @@ async function setSubtaskDone(t, subtaskId, done) {
 
 async function setTaskCompleted(t, completed) {
   try {
-    await setDoc(doc(db, "investmentTasks", t.id), {
+    await setDoc(doc(db, "investorTasks", t.id), {
       completed,
       completedOn: completed ? todayISO() : "",
       completedBy: completed ? state.user.email : "",
@@ -1037,88 +863,41 @@ async function setTaskCompleted(t, completed) {
   }
 }
 
-$("btn-move-track").addEventListener("click", async () => {
-  const i = investmentById(state.openInvestmentId);
-  if (!i) return;
-  const n = tasksFor(i.id).length;
-  const withTasks = n ? `, with its ${n} task${n === 1 ? "" : "s"},` : "";
-  let changes;
+/* ============================ investor drawer ============================ */
+$("btn-add-investor").addEventListener("click", () => openInvestorDrawer(null));
+$("btn-edit-investor").addEventListener("click", () => openInvestorDrawer(investorById(state.openInvestorId)));
+$("btn-drawer-close").addEventListener("click", closeInvestorDrawer);
+$("drawer-backdrop").addEventListener("click", closeInvestorDrawer);
 
-  if (isCirp(i)) {
-    const approved = /approved/i.test(i.cirpStage || "");
-    if (!confirm(
-      `Move "${i.name}"${withTasks} to the Investments tab?\n\n` +
-      (approved ? "" : `Its CIRP stage is "${stageLabel(i)}", so the resolution plan isn't marked as approved yet. Move it anyway?\n\n`) +
-      `It starts there at the "${i.stage || "Approved"}" stage, which you can change. You can also send it back to CIRP later.`
-    )) return;
-    changes = {
-      track: "investment",
-      stage: i.stage || "Approved",
-      movedFromCirpOn: todayISO(),
-      movedFromCirpBy: state.user.email
-    };
-  } else {
-    if (!confirm(`Send "${i.name}"${withTasks} back to the CIRP tab?`)) return;
-    changes = { track: "cirp" };
-  }
+const numVal = (v) => (isNum(v) ? v : "");
 
-  try {
-    await setDoc(doc(db, "investments", i.id), {
-      ...changes, updatedAt: serverTimestamp(), updatedBy: state.user.email
-    }, { merge: true });
-    Object.assign(i, changes);
-    renderSchemePills();
-    openInvestment(i.id);
-    renderAll();
-    toast(isCirp(i) ? "Moved back to CIRP" : "Moved to Investments");
-  } catch (err) {
-    alert("Couldn't move it: " + err.message);
-  }
-});
-
-/* ============================ investment drawer ============================ */
-$("btn-add-investment").addEventListener("click", () => openInvestmentDrawer(null, "investment"));
-$("btn-add-cirp").addEventListener("click", () => openInvestmentDrawer(null, "cirp"));
-$("btn-edit-investment").addEventListener("click", () => openInvestmentDrawer(investmentById(state.openInvestmentId)));
-$("btn-drawer-close").addEventListener("click", closeInvestmentDrawer);
-$("drawer-backdrop").addEventListener("click", closeInvestmentDrawer);
-
-// `track` only matters for a new record: which tab's "+ Add" was pressed.
-// An existing record keeps the track it already has.
-function openInvestmentDrawer(i, track = "investment") {
-  const cirp = i ? isCirp(i) : track === "cirp";
+function openInvestorDrawer(i) {
   $("drawer-error").hidden = true;
-  $("drawer-title").textContent = `${i ? "Edit" : "Add"} ${cirp ? "CIRP case" : "investment"}`;
+  $("drawer-title").textContent = i ? "Edit investor" : "Add investor";
   $("i-id").value = i ? i.id : "";
-  $("i-track").value = cirp ? "cirp" : "investment";
-  $("i-stage-field").hidden = cirp;
-  $("i-cirp-stage-field").hidden = !cirp;
   $("i-name").value = i ? i.name || "" : "";
-  $("i-scheme").value = i ? i.schemeCode || "" : (state.schemeFilter || (state.schemes[0] && state.schemes[0].code) || "");
-  $("i-counterparty").value = i ? i.counterparty || "" : "";
-  // A new CIRP case is almost always a resolution plan, so start it there.
-  const cirpInstrument = optionsFor("instrument").find((v) => /resolution plan/i.test(v)) || "";
-  $("i-instrument").value = i ? i.instrument || "" : (cirp ? cirpInstrument : "");
-  $("i-stage").value = i ? i.stage || "Screening" : "Screening";
-  $("i-cirp-stage").value = (i && i.cirpStage) || optionsFor("cirpStage")[0] || "";
-  $("i-sector").value = i ? i.sector || "" : "";
-  $("i-tranche").value = i ? i.tranche || "" : "";
-  $("i-date").value = i ? i.investmentDate || "" : "";
-  $("i-cost").value = i && i.acquisitionCost !== undefined && i.acquisitionCost !== null ? i.acquisitionCost : "";
-  $("i-face").value = i && i.faceValue !== undefined && i.faceValue !== null ? i.faceValue : "";
-  $("i-nclt").value = i ? i.ncltRef || "" : "";
+  $("i-scheme").value = i ? i.schemeCode || "" : (state.schemeFilter || (activeSchemes()[0] && activeSchemes()[0].code) || "");
+  $("i-type").value = i ? i.investorType || "" : "";
+  $("i-status").value = (i && i.status) || optionsFor("investorStatus")[0] || "";
+  $("i-industry").value = i ? i.industry || "" : "";
+  $("i-committed").value = i ? numVal(i.committedAmount) : "";
+  $("i-drawdown").value = i ? numVal(i.drawdownAmount) : "";
+  $("i-contact-name").value = i ? i.contactName || "" : "";
+  $("i-contact-email").value = i ? i.contactEmail || "" : "";
+  $("i-contact-phone").value = i ? i.contactPhone || "" : "";
+  $("i-contact-other").value = i ? i.contactOther || "" : "";
   $("i-owner").value = i ? i.ownerEmail || "" : "";
   $("i-link").value = i ? i.docLink || "" : "";
   $("i-notes").value = i ? i.notes || "" : "";
   $("i-archived").checked = i ? !!i.archived : false;
-  $("btn-delete-investment").hidden = !(i && isAdmin());
+  $("btn-delete-investor").hidden = !(i && isAdmin());
 
   $("drawer").hidden = false;
   $("drawer").setAttribute("aria-hidden", "false");
   $("drawer-backdrop").hidden = false;
   $("i-name").focus();
 }
-function closeInvestmentDrawer() {
+function closeInvestorDrawer() {
   $("drawer").hidden = true;
   $("drawer").setAttribute("aria-hidden", "true");
   $("drawer-backdrop").hidden = true;
@@ -1126,35 +905,35 @@ function closeInvestmentDrawer() {
 
 const numOrNull = (v) => (v === "" || v === null || v === undefined ? null : Number(v));
 
-$("form-investment").addEventListener("submit", async (e) => {
+$("form-investor").addEventListener("submit", async (e) => {
   e.preventDefault();
   const err = $("drawer-error");
   err.hidden = true;
 
   const name = $("i-name").value.trim();
   const schemeCode = $("i-scheme").value;
-  if (!name) { err.textContent = "Give the investment a name."; err.hidden = false; return; }
+  if (!name) { err.textContent = "Give the investor a name."; err.hidden = false; return; }
   if (!schemeCode) { err.textContent = "Pick a scheme."; err.hidden = false; return; }
 
+  const committedAmount = numOrNull($("i-committed").value);
+  const drawdownAmount = numOrNull($("i-drawdown").value);
+  if (committedAmount !== null && drawdownAmount !== null && drawdownAmount > committedAmount &&
+      !confirm("The drawdown is more than the commitment. Save it anyway?")) return;
+
   const scheme = state.schemes.find((s) => s.code === schemeCode);
-  const cirp = $("i-track").value === "cirp";
-  const existing = investmentById($("i-id").value);
   const payload = {
     name,
     schemeCode,
     schemeName: scheme ? scheme.name : schemeCode,
-    counterparty: $("i-counterparty").value.trim(),
-    instrument: $("i-instrument").value,
-    track: cirp ? "cirp" : "investment",
-    // A CIRP case has no investment stage until it's moved to Investments,
-    // so leave whatever it had (nothing, for a new case) untouched.
-    stage: cirp ? (existing ? existing.stage || "" : "") : $("i-stage").value,
-    sector: $("i-sector").value,
-    tranche: $("i-tranche").value,
-    investmentDate: $("i-date").value || "",
-    acquisitionCost: numOrNull($("i-cost").value),
-    faceValue: numOrNull($("i-face").value),
-    ncltRef: $("i-nclt").value.trim(),
+    investorType: $("i-type").value,
+    status: $("i-status").value,
+    industry: $("i-industry").value,
+    committedAmount,
+    drawdownAmount,
+    contactName: $("i-contact-name").value.trim(),
+    contactEmail: $("i-contact-email").value.trim(),
+    contactPhone: $("i-contact-phone").value.trim(),
+    contactOther: $("i-contact-other").value.trim(),
     ownerEmail: $("i-owner").value,
     docLink: $("i-link").value.trim(),
     notes: $("i-notes").value.trim(),
@@ -1162,22 +941,21 @@ $("form-investment").addEventListener("submit", async (e) => {
     updatedAt: serverTimestamp(),
     updatedBy: state.user.email
   };
-  if (cirp) payload.cirpStage = $("i-cirp-stage").value;
 
   try {
     const id = $("i-id").value;
     if (id) {
-      await setDoc(doc(db, "investments", id), payload, { merge: true });
-      toast(cirp ? "CIRP case updated" : "Investment updated");
+      await setDoc(doc(db, "investors", id), payload, { merge: true });
+      toast("Investor updated");
     } else {
       payload.createdAt = serverTimestamp();
       payload.createdBy = state.user.email;
-      const ref = await addDoc(collection(db, "investments"), payload);
-      state.openInvestmentId = ref.id;
-      toast(cirp ? "CIRP case added" : "Investment added");
+      const ref = await addDoc(collection(db, "investors"), payload);
+      state.openInvestorId = ref.id;
+      toast("Investor added");
     }
-    closeInvestmentDrawer();
-    await loadInvestments();
+    closeInvestorDrawer();
+    await loadInvestors();
     renderSchemePills();
     renderAll();
   } catch (e2) {
@@ -1186,9 +964,9 @@ $("form-investment").addEventListener("submit", async (e) => {
   }
 });
 
-$("btn-delete-investment").addEventListener("click", async () => {
+$("btn-delete-investor").addEventListener("click", async () => {
   const id = $("i-id").value;
-  const i = investmentById(id);
+  const i = investorById(id);
   if (!i) return;
   const n = tasksFor(id).length;
   if (!confirm(
@@ -1199,22 +977,22 @@ $("btn-delete-investment").addEventListener("click", async () => {
 
   try {
     const batch = writeBatch(db);
-    tasksFor(id).forEach((t) => batch.delete(doc(db, "investmentTasks", t.id)));
-    batch.delete(doc(db, "investments", id));
+    tasksFor(id).forEach((t) => batch.delete(doc(db, "investorTasks", t.id)));
+    batch.delete(doc(db, "investors", id));
     await batch.commit();
-    closeInvestmentDrawer();
-    state.openInvestmentId = null;
-    await Promise.all([loadInvestments(), loadTasks()]);
+    closeInvestorDrawer();
+    state.openInvestorId = null;
+    await Promise.all([loadInvestors(), loadTasks()]);
     renderSchemePills();
     renderAll();
-    toast("Investment deleted");
+    toast("Investor deleted");
   } catch (e) {
     alert("Couldn't delete: " + e.message);
   }
 });
 
 /* ============================ task drawer ============================ */
-$("btn-add-task").addEventListener("click", () => openTaskDrawer(state.openInvestmentId, null));
+$("btn-add-task").addEventListener("click", () => openTaskDrawer(state.openInvestorId, null));
 $("btn-task-close").addEventListener("click", closeTaskDrawer);
 $("task-backdrop").addEventListener("click", closeTaskDrawer);
 
@@ -1287,15 +1065,15 @@ $("t-subtasks").addEventListener("click", (e) => {
   renderSubtaskEditor();
 });
 
-function openTaskDrawer(investmentId, t) {
-  const inv = investmentById(investmentId);
+function openTaskDrawer(investorId, t) {
+  const inv = investorById(investorId);
   if (!inv) return;
 
   $("task-error").hidden = true;
   $("task-drawer-title").textContent = t ? "Edit task" : "Add task";
   $("t-context").textContent = `${inv.name} · ${inv.schemeName || inv.schemeCode}`;
   $("t-id").value = t ? t.id : "";
-  $("t-investment-id").value = investmentId;
+  $("t-investor-id").value = investorId;
   $("t-title").value = t ? t.title || "" : "";
 
   const timed = t ? t.taskType === "timed" : true;
@@ -1339,8 +1117,8 @@ $("form-task").addEventListener("submit", async (e) => {
   const title = $("t-title").value.trim();
   const timed = $("t-type-timed").checked;
   const dueDate = $("t-duedate").value;
-  const investmentId = $("t-investment-id").value;
-  const inv = investmentById(investmentId);
+  const investorId = $("t-investor-id").value;
+  const inv = investorById(investorId);
 
   if (!title) { err.textContent = "Give the task a name."; err.hidden = false; return; }
   if (timed && !dueDate) {
@@ -1355,8 +1133,8 @@ $("form-task").addEventListener("submit", async (e) => {
     .filter((st) => st.title);
 
   const payload = {
-    investmentId,
-    investmentName: inv ? inv.name : "",
+    investorId,
+    investorName: inv ? inv.name : "",
     schemeCode: inv ? inv.schemeCode : "",
     schemeName: inv ? inv.schemeName : "",
     title,
@@ -1381,7 +1159,7 @@ $("form-task").addEventListener("submit", async (e) => {
   try {
     const id = $("t-id").value;
     if (id) {
-      await setDoc(doc(db, "investmentTasks", id), payload, { merge: true });
+      await setDoc(doc(db, "investorTasks", id), payload, { merge: true });
       toast("Task updated");
     } else {
       payload.createdAt = serverTimestamp();
@@ -1390,7 +1168,7 @@ $("form-task").addEventListener("submit", async (e) => {
       // at the bottom of it. Before then there's no order to join.
       const orders = state.tasks.map((x) => x.sortOrder).filter((v) => typeof v === "number");
       if (orders.length) payload.sortOrder = Math.max(...orders) + 1;
-      await addDoc(collection(db, "investmentTasks"), payload);
+      await addDoc(collection(db, "investorTasks"), payload);
       toast("Task added");
     }
     closeTaskDrawer();
@@ -1408,7 +1186,7 @@ $("btn-delete-task").addEventListener("click", async () => {
   if (!t) return;
   if (!confirm(`Delete the task "${t.title}"? This cannot be undone.`)) return;
   try {
-    await deleteDoc(doc(db, "investmentTasks", id));
+    await deleteDoc(doc(db, "investorTasks", id));
     closeTaskDrawer();
     await loadTasks();
     renderAll();
@@ -1445,8 +1223,8 @@ function renderTasksTab() {
   if (cat) rows = rows.filter((t) => t.category === cat);
   if (q) {
     rows = rows.filter((t) => {
-      const inv = investmentById(t.investmentId);
-      return [t.title, t.notes, t.category, inv && inv.name, inv && inv.counterparty,
+      const inv = investorById(t.investorId);
+      return [t.title, t.notes, t.category, inv && inv.name, inv && inv.contactName,
         ...(t.subtasks || []).map((st) => st.title)]
         .some((v) => String(v || "").toLowerCase().includes(q));
     });
@@ -1455,12 +1233,12 @@ function renderTasksTab() {
 
   $("tasks-empty").hidden = rows.length > 0;
   $("tasks-body").innerHTML = rows.map((t) => {
-    const inv = investmentById(t.investmentId);
+    const inv = investorById(t.investorId);
     const s = taskStatus(t);
     const days = t.dueDate && !t.completed ? daysBetween(t.dueDate) : null;
     const sc = subtaskCount(t);
     const expanded = sc.total > 0 && state.expandedTasks.has(t.id);
-    return `<tr class="clickable task-tr" data-id="${esc(t.id)}" data-inv="${esc(t.investmentId)}">
+    return `<tr class="clickable task-tr" data-id="${esc(t.id)}" data-inv="${esc(t.investorId)}">
       <td class="col-drag">${draggable
         ? `<button type="button" class="drag-handle" title="Drag to move, or focus and press ↑ / ↓" aria-label="Move ${esc(t.title)}">⠿</button>`
         : ""}</td>
@@ -1470,7 +1248,7 @@ function renderTasksTab() {
       <td>${badge(s)}</td>
       <td><span class="oblig-name">${esc(t.title)}</span>${t.priority && t.priority !== "Normal" ? ` <span class="prio-tag ${prioClass(t.priority)}">${esc(t.priority)}</span>` : ""}
         ${sc.total ? `<button type="button" class="st-toggle" aria-expanded="${expanded}">${expanded ? "▾" : "▸"} ${sc.done}/${sc.total} sub-tasks</button>` : ""}</td>
-      <td>${esc(inv ? inv.name : "—")}${isCirp(inv) ? ' <span class="type-tag">CIRP</span>' : ""}</td>
+      <td>${esc(inv ? inv.name : "—")}</td>
       <td>${esc(inv ? (inv.schemeName || inv.schemeCode) : "—")}</td>
       <td>${t.category ? `<span class="type-tag">${esc(t.category)}</span>` : "—"}</td>
       <td>${esc(personName(t.ownerEmail))}</td>
@@ -1503,7 +1281,7 @@ $("tasks-body").addEventListener("click", async (e) => {
   }
   if (tr.classList.contains("subtask-tr")) return;
   if (e.target.closest("a")) return; // let links through
-  openInvestment(tr.dataset.inv);
+  openInvestor(tr.dataset.inv);
 });
 
 /* ---------- drag to reorder ----------
@@ -1541,7 +1319,7 @@ async function moveTask(taskId, targetId, where) {
     for (let k = 0; k < changed.length; k += 400) {
       const batch = writeBatch(db);
       changed.slice(k, k + 400).forEach((t) =>
-        batch.set(doc(db, "investmentTasks", t.id), { sortOrder: t.sortOrder }, { merge: true }));
+        batch.set(doc(db, "investorTasks", t.id), { sortOrder: t.sortOrder }, { merge: true }));
       await batch.commit();
     }
   } catch (err) {
@@ -1612,7 +1390,7 @@ $("tasks-body").addEventListener("keydown", async (e) => {
 /* ============================ schemes tab ============================ */
 function renderSchemes() {
   $("schemes-body").innerHTML = state.schemes.map((s) => {
-    const count = state.investments.filter((i) => i.schemeCode === s.code && !isCirp(i)).length;
+    const count = state.investors.filter((i) => i.schemeCode === s.code).length;
     return `<tr data-code="${esc(s.code)}">
       <td>${esc(s.name)}</td>
       <td><span class="type-tag">${esc(s.code)}</span></td>
@@ -1631,11 +1409,11 @@ $("schemes-body").addEventListener("click", async (e) => {
   const scheme = state.schemes.find((s) => s.code === code);
   if (!scheme) return;
   const isActive = scheme.active !== false;
-  const count = state.investments.filter((i) => i.schemeCode === code).length;
+  const count = state.investors.filter((i) => i.schemeCode === code).length;
 
   if (isActive && !confirm(
     `Archive "${scheme.name}"?\n\n` +
-    (count ? `Its investments and CIRP cases (${count} in all) and their tasks stay exactly as they are — nothing is deleted. ` : "") +
+    (count ? `Its ${count} investor${count === 1 ? "" : "s"} and their tasks stay exactly as they are — nothing is deleted. ` : "") +
     `The scheme just disappears from the button bar and the dropdowns. You can restore it any time.`
   )) return;
 
@@ -1691,7 +1469,7 @@ $("btn-add-scheme").addEventListener("click", async () => {
 /* ============================ team tab ============================ */
 function renderTeam() {
   $("team-body").innerHTML = state.team.map((p) => {
-    const owned = state.investments.filter((i) => i.ownerEmail === p.email && !i.archived).length;
+    const owned = state.investors.filter((i) => i.ownerEmail === p.email && !i.archived).length;
     const open = state.tasks.filter((t) => t.ownerEmail === p.email && !t.completed).length;
     const isMe = state.user && p.email === state.user.email.toLowerCase();
     return `<tr data-email="${esc(p.email)}">
@@ -1808,5 +1586,5 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!$("task-drawer").hidden) closeTaskDrawer();
   else if (!$("person-drawer").hidden) closePersonDrawer();
-  else if (!$("drawer").hidden) closeInvestmentDrawer();
+  else if (!$("drawer").hidden) closeInvestorDrawer();
 });
