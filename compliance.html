@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compliance — Tavasya Capital</title>
+<script>
+  // Runs before the stylesheet loads, so the right theme is on screen
+  // from the very first paint instead of flashing dark-then-light (or
+  // the reverse) on every visit.
+  try {
+    var savedTheme = localStorage.getItem("tavasya-theme") || "dark";
+    document.documentElement.setAttribute("data-theme", savedTheme);
+  } catch (e) {}
+</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%230F1210'/%3E%3Ctext x='50' y='68' font-family='Georgia,serif' font-size='58' font-style='italic' fill='%23C9A24B' text-anchor='middle' transform='rotate(8 50 50)'%3E%CE%B6%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body class="page-compliance">
+
+<!-- ============ BOOT ============ -->
+<div id="boot-splash" class="boot-splash">
+  <div class="mark" aria-hidden="true">ζ</div>
+  <p>Starting up…</p>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="view-app" class="app" hidden>
+
+  <header class="topbar">
+    <a class="brand" href="index.html" title="Back to all functions">
+      <span class="mark small" aria-hidden="true">ζ</span>
+      <span class="brand-name">TAVASYA CAPITAL</span>
+      <span class="brand-sep">/</span>
+      <span class="brand-sub">Compliance</span>
+    </a>
+    <nav class="tabs" id="main-tabs">
+      <button class="tab active" data-tab="dashboard">Dashboard</button>
+      <button class="tab" data-tab="register">Register</button>
+      <button class="tab" data-tab="schemes">Schemes</button>
+      <button class="tab" data-tab="team">Team</button>
+    </nav>
+    <div class="who">
+      <button id="btn-theme" class="btn-icon theme-toggle" title="Switch theme">🌙</button>
+      <a href="index.html" class="btn-link switch-link">⇄ Functions</a>
+      <span id="who-name"></span>
+      <button id="btn-signout" class="btn-link">Sign out</button>
+    </div>
+  </header>
+
+  <!-- ---------- DASHBOARD ---------- -->
+  <section id="tab-dashboard" class="tab-panel active">
+    <div class="hero">
+      <p class="eyebrow">Distance to due</p>
+      <h1 class="hero-title">Nothing is missed <span class="ital">by accident.</span></h1>
+      <div class="distance-meter" id="distance-meter">
+        <div class="dm-track">
+          <div class="dm-fill" id="dm-fill"></div>
+          <div class="dm-marker" id="dm-marker"></div>
+        </div>
+        <div class="dm-labels">
+          <span>15+ days out</span>
+          <span>Due today</span>
+          <span class="dm-overdue-label">Overdue</span>
+        </div>
+      </div>
+      <p class="dm-caption" id="dm-caption">Loading the register…</p>
+    </div>
+
+    <div class="filters dash-filters">
+      <select id="d-scheme"><option value="">All schemes</option></select>
+      <select id="d-type"><option value="">All types</option></select>
+    </div>
+
+    <div class="kpi-strip" id="kpi-strip">
+      <div class="kpi" data-status="OVERDUE"><span class="kpi-num" id="k-overdue">–</span><span class="kpi-label">Overdue</span></div>
+      <div class="kpi" data-status="DUE SOON"><span class="kpi-num" id="k-duesoon">–</span><span class="kpi-label">Due in 1 Week</span></div>
+      <div class="kpi" data-status="UPCOMING"><span class="kpi-num" id="k-upcoming">–</span><span class="kpi-label">Upcoming</span></div>
+      <div class="kpi" data-status="DONE"><span class="kpi-num" id="k-done">–</span><span class="kpi-label">Completed</span></div>
+      <div class="kpi" data-status="ONGOING"><span class="kpi-num" id="k-ongoing">–</span><span class="kpi-label">Ongoing</span></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head weekly-head">
+        <div class="weekly-title-group">
+          <h2 id="weekly-title">Tasks Due</h2>
+          <button id="btn-clear-status-filter" class="week-today-btn" hidden>✕ Clear filter</button>
+        </div>
+        <div class="week-nav" id="week-nav">
+          <button id="btn-week-prev" class="btn-icon" title="Previous week">←</button>
+          <button id="btn-week-today" class="btn-link week-today-btn">This week</button>
+          <button id="btn-week-next" class="btn-icon" title="Next week">→</button>
+        </div>
+      </div>
+      <div id="overdue-section" hidden>
+        <p class="section-label overdue-label">Overdue — regardless of week</p>
+        <div id="overdue-list" class="week-list"></div>
+      </div>
+      <p class="section-label" id="week-section-label">This week</p>
+      <div id="due-this-week" class="week-list"></div>
+    </div>
+  </section>
+
+  <!-- ---------- REGISTER ---------- -->
+  <section id="tab-register" class="tab-panel">
+    <div class="panel-head panel-head-row">
+      <h2>Register</h2>
+      <div class="register-actions">
+        <button id="btn-import-excel" class="btn" hidden>Import from Excel</button>
+        <input type="file" id="excel-file-input" accept=".xlsx" hidden>
+        <button id="btn-add" class="btn btn-primary">+ Add compliance</button>
+      </div>
+    </div>
+
+    <div class="filters">
+      <input type="search" id="f-search" placeholder="Search obligations…">
+      <select id="f-scheme"><option value="">All schemes</option></select>
+      <select id="f-type"><option value="">All types</option></select>
+      <button type="button" id="btn-manage-types-register" class="btn-link">Manage types…</button>
+      <select id="f-status">
+        <option value="">All statuses</option>
+        <option value="OVERDUE">Overdue</option>
+        <option value="DUE SOON">Due soon</option>
+        <option value="UPCOMING">Upcoming</option>
+        <option value="DONE">Completed</option>
+        <option value="ONGOING">Ongoing</option>
+      </select>
+    </div>
+
+    <div class="table-wrap">
+      <table class="ledger">
+        <thead>
+          <tr>
+            <th>Due</th><th>Days</th><th>Status</th><th>Obligation</th>
+            <th>Scheme</th><th>Type</th><th>Owner</th><th>Link</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="register-body"></tbody>
+      </table>
+      <p id="register-empty" class="empty" hidden>Nothing matches those filters.</p>
+    </div>
+  </section>
+
+  <!-- ---------- SCHEMES ---------- -->
+  <section id="tab-schemes" class="tab-panel">
+    <div class="panel-head panel-head-row">
+      <h2>Schemes</h2>
+      <button id="btn-add-scheme" class="btn btn-primary" hidden>+ Add scheme</button>
+    </div>
+    <div class="table-wrap">
+      <table class="ledger">
+        <thead><tr><th>Name</th><th>Code</th><th>Compliances</th><th>Status</th><th></th></tr></thead>
+        <tbody id="schemes-body"></tbody>
+      </table>
+    </div>
+    <p class="empty-note" style="padding:16px 0 0">
+      Registering a new scheme clones every obligation from an existing one — same due dates,
+      same regulators, since these are calendar-based filings that apply the same way regardless
+      of when a scheme launched. Assign owners and links to the new copies afterward from the Register tab.
+    </p>
+  </section>
+
+  <!-- ---------- TEAM ---------- -->
+  <section id="tab-team" class="tab-panel">
+    <div class="panel-head panel-head-row">
+      <h2>Team</h2>
+      <button id="btn-add-person" class="btn btn-primary" hidden>+ Add person</button>
+    </div>
+    <div class="table-wrap">
+      <table class="ledger">
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Reports to</th><th>Status</th><th></th></tr></thead>
+        <tbody id="team-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<!-- ============ DRAWER: add/edit compliance ============ -->
+<div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+<aside id="drawer" class="drawer" hidden aria-hidden="true">
+  <div class="drawer-head">
+    <h2 id="drawer-title">Add compliance</h2>
+    <button id="btn-drawer-close" class="btn-icon" aria-label="Close">✕</button>
+  </div>
+  <form id="form-compliance" class="drawer-form">
+    <input type="hidden" id="c-id">
+
+    <label class="field"><span>Obligation *</span>
+      <input type="text" id="c-obligation" required></label>
+
+    <div class="field-row">
+      <label class="field"><span>Scheme *</span>
+        <select id="c-scheme" required></select></label>
+      <label class="field"><span>Frequency</span>
+        <select id="c-frequency"></select></label>
+    </div>
+
+    <label class="field"><span>Compliance type *</span>
+      <select id="c-type" required></select></label>
+    <button type="button" id="btn-manage-types" class="btn-link" style="margin:-8px 0 4px">Manage types…</button>
+
+    <div class="field-row">
+      <label class="field"><span>Period</span>
+        <input type="text" id="c-period" placeholder="e.g. Jul–Sep 2026"></label>
+      <label class="field"><span>Financial year</span>
+        <input type="text" id="c-fy" placeholder="e.g. F.Y 2026-2027"></label>
+    </div>
+
+    <div class="field-row">
+      <label class="field"><span>Due date</span>
+        <input type="date" id="c-duedate"></label>
+      <label class="field"><span>Reminder lead (days)</span>
+        <input type="number" id="c-lead" min="1" max="180" value="15"></label>
+    </div>
+    <p class="field-hint">Leave the due date blank for ongoing / event-based obligations — these never trigger a reminder.</p>
+
+    <label class="field"><span>Regulator / authority</span>
+      <input type="text" id="c-regulator" placeholder="e.g. SEBI — SI Portal"></label>
+
+    <label class="field"><span>Filing link</span>
+      <input type="url" id="c-link" placeholder="https://…"></label>
+
+    <div class="field-row">
+      <label class="field"><span>Owner</span>
+        <select id="c-owner"><option value="">Unassigned</option></select></label>
+      <label class="field"><span>CC on reminders</span>
+        <select id="c-cc"><option value="">None</option></select></label>
+    </div>
+
+    <label class="field"><span>Notes</span>
+      <textarea id="c-notes" rows="3"></textarea></label>
+
+    <fieldset class="done-block">
+      <label class="check"><input type="checkbox" id="c-completed"> Marked complete</label>
+      <div id="done-fields" class="done-fields" hidden>
+        <label class="field"><span>OneDrive link to the filed document *</span>
+          <input type="url" id="c-prooflink" placeholder="https://onedrive.live.com/... or https://tavasya.sharepoint.com/..."></label>
+        <label class="field"><span>Filed on</span><input type="date" id="c-completedon"></label>
+        <label class="field"><span>Filed by</span><input type="text" id="c-filedby" placeholder="Name"></label>
+        <label class="field"><span>Acknowledgement / ref no.</span><input type="text" id="c-ackref"></label>
+      </div>
+    </fieldset>
+
+    <p id="drawer-error" class="auth-error" hidden></p>
+    <div class="drawer-actions">
+      <button type="button" id="btn-delete" class="btn btn-danger" hidden>Delete</button>
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</aside>
+
+<!-- ============ MODAL: compliance details (admin-only, read-only) ============ -->
+<div id="detail-backdrop" class="drawer-backdrop" hidden></div>
+<div id="detail-modal" class="modal-card" hidden>
+  <div class="drawer-head">
+    <h2>Compliance details</h2>
+    <button id="btn-detail-close" class="btn-icon" aria-label="Close">✕</button>
+  </div>
+  <div class="detail-body">
+    <p class="detail-oblig" id="dt-obligation"></p>
+    <p class="detail-sub" id="dt-scheme-period"></p>
+    <div class="detail-row"><span class="badge" id="dt-status"></span><span id="dt-due" class="detail-due"></span></div>
+
+    <div class="detail-grid">
+      <div>
+        <p class="detail-label">Responsible (Owner)</p>
+        <p class="detail-value" id="dt-owner-name">—</p>
+        <p class="detail-sub" id="dt-owner-email"></p>
+      </div>
+      <div>
+        <p class="detail-label">Team Lead</p>
+        <p class="detail-value" id="dt-lead-name">—</p>
+        <p class="detail-sub" id="dt-lead-email"></p>
+      </div>
+    </div>
+
+    <div class="detail-grid">
+      <div>
+        <p class="detail-label">Regulator</p>
+        <p class="detail-value" id="dt-regulator">—</p>
+      </div>
+      <div>
+        <p class="detail-label">Filing link</p>
+        <p class="detail-value" id="dt-link">—</p>
+      </div>
+    </div>
+
+    <div>
+      <p class="detail-label">Notes</p>
+      <p class="detail-value" id="dt-notes">—</p>
+    </div>
+
+    <div id="dt-proof-row" hidden style="margin-top:14px">
+      <p class="detail-label">Completion proof</p>
+      <p class="detail-value" id="dt-prooflink">—</p>
+    </div>
+
+    <div class="drawer-actions" style="justify-content:flex-end">
+      <button id="btn-detail-edit" class="btn btn-primary">Edit this compliance</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL: manage compliance types ============ -->
+<div id="types-backdrop" class="drawer-backdrop" hidden></div>
+<div id="types-modal" class="modal-card types-modal" hidden>
+  <div class="drawer-head">
+    <h2 id="types-modal-title">Manage types</h2>
+    <button id="btn-types-close" class="btn-icon" aria-label="Close">✕</button>
+  </div>
+
+  <!-- ---- list view ---- -->
+  <div id="types-view-list" class="detail-body">
+    <p class="detail-sub" style="margin-bottom:14px">Reassign is open to anyone. Deleting a type needs Admin or Team Lead.</p>
+    <table class="ledger">
+      <thead><tr><th>Type</th><th>Used by</th><th></th></tr></thead>
+      <tbody id="types-list-body"></tbody>
+    </table>
+  </div>
+
+  <!-- ---- checklist view ---- -->
+  <div id="types-view-checklist" class="detail-body" hidden>
+    <p class="detail-sub"><span id="types-checklist-mode-label"></span> <strong id="types-checklist-target"></strong></p>
+    <p class="detail-sub" id="types-checklist-help" style="margin-bottom:14px"></p>
+
+    <div id="types-staged-wrap" hidden>
+      <p class="detail-label" style="margin-top:0">Staged this session</p>
+      <div id="types-staged-list" class="staged-list"></div>
+    </div>
+
+    <p class="detail-label" id="types-remaining-label">Remaining</p>
+    <label class="check" style="margin-bottom:8px"><input type="checkbox" id="types-select-all"> Select all remaining</label>
+    <div id="types-checklist-items" class="checklist-items"></div>
+
+    <div class="field-row" style="margin-top:16px; align-items:flex-end">
+      <label class="field"><span>Move selected to</span>
+        <select id="types-destination"></select></label>
+      <button type="button" id="btn-types-assign" class="btn btn-primary">Assign selected →</button>
+    </div>
+
+    <p id="types-checklist-error" class="auth-error" hidden></p>
+
+    <div class="drawer-actions">
+      <button type="button" id="btn-types-back" class="btn-link">← Back to types list</button>
+      <button type="button" id="btn-types-commit" class="btn btn-primary">Finish</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL: import from Excel ============ -->
+<div id="excel-backdrop" class="drawer-backdrop" hidden></div>
+<div id="excel-modal" class="modal-card import-modal" hidden>
+  <div class="drawer-head">
+    <h2>Import from Excel</h2>
+    <button id="btn-excel-close" class="btn-icon" aria-label="Close">✕</button>
+  </div>
+  <div class="detail-body">
+
+    <div id="excel-view-loading">
+      <p class="detail-sub">Reading the file…</p>
+    </div>
+
+    <!-- resolve any sheet whose scheme name doesn't match an existing scheme -->
+    <div id="excel-view-resolve" hidden>
+      <p class="detail-sub" style="margin-bottom:14px">
+        These sheet names didn't match an existing scheme. Pick one, or create a new scheme for it.
+      </p>
+      <div id="excel-resolve-list"></div>
+      <div class="drawer-actions" style="justify-content:flex-end">
+        <button type="button" id="btn-excel-resolve-continue" class="btn btn-primary">Continue</button>
+      </div>
+    </div>
+
+    <!-- review before anything is written -->
+    <div id="excel-view-review" hidden>
+      <div class="import-summary">
+        <div class="import-stat"><span class="import-stat-num" id="ex-new">0</span><span>New</span></div>
+        <div class="import-stat"><span class="import-stat-num" id="ex-updated">0</span><span>Updated</span></div>
+        <div class="import-stat"><span class="import-stat-num" id="ex-proofpending">0</span><span>Proof pending</span></div>
+        <div class="import-stat import-stat-error"><span class="import-stat-num" id="ex-errors">0</span><span>Skipped</span></div>
+      </div>
+      <p class="detail-sub" style="margin:12px 0">
+        Existing Owner, Link, CC, Reminder lead time, and Compliance type are never overwritten by this import.
+        A completion already confirmed in the app (with a real proof link) is never reverted back to incomplete
+        by a stale sheet — the sheet can only move things forward, not undo confirmed work.
+      </p>
+      <div id="excel-errors-wrap" hidden>
+        <p class="detail-label">Skipped rows</p>
+        <div id="excel-errors-list" class="checklist-items" style="max-height:140px"></div>
+      </div>
+      <div class="drawer-actions">
+        <button type="button" id="btn-excel-cancel" class="btn-link">Cancel — nothing saved yet</button>
+        <button type="button" id="btn-excel-commit" class="btn btn-primary">Confirm import</button>
+      </div>
+    </div>
+
+    <!-- nothing usable found -->
+    <div id="excel-view-empty" hidden>
+      <p class="detail-sub">No scheme sheets were recognized in this file — check it matches the usual calendar layout (one sheet per scheme, same 10 columns).</p>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============ TOAST ============ -->
+<div id="toast" class="toast" hidden></div>
+
+<script type="module" src="compliance.js"></script>
+</body>
+</html>

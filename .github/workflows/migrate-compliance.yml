@@ -1,0 +1,33 @@
+name: Copy compliance data across (one-off)
+
+# Copies the Compliance Register's records from its old Firebase project
+# into this one. Run "dry-run" first to see what it would do, then "copy".
+# Safe to repeat; see scripts/migrate-compliance.js.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run reports only; copy writes"
+        type: choice
+        options: [dry-run, copy]
+        default: dry-run
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install firebase-admin
+
+      - name: Copy compliance data
+        env:
+          MODE: ${{ inputs.mode }}
+          COMPLIANCE_SERVICE_ACCOUNT_JSON: ${{ secrets.COMPLIANCE_SERVICE_ACCOUNT_JSON }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: node scripts/migrate-compliance.js

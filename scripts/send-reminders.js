@@ -1,8 +1,12 @@
 // Runs once a day (see .github/workflows/reminders.yml).
 //
-// For every investment task that is time-bound, not completed, and inside
-// its reminder window (or already overdue), sends one digest email to the
-// task's owner. Tasks with no owner go to every admin instead, so nothing
+// Covers the Investments and Investor Relations sections, which share the
+// same task shape. (Compliance has its own script,
+// send-compliance-reminders.js.)
+//
+// For every task that is time-bound, not completed, and inside its
+// reminder window (or already overdue), sends one digest email per
+// section to the task's owner. Tasks with no owner go to every admin instead, so nothing
 // falls through silently.
 //
 // Open / no-date tasks are deliberately never emailed — that's the whole
@@ -17,15 +21,14 @@
 // admin-consented Mail.Send permission, which Tavasya wanted to avoid.
 // This path needs only a per-mailbox setting and a password.
 //
-// The Firebase key must be for the INVESTMENTS project, which is separate
-// from the compliance register's. The mailbox and App Password, on the
-// other hand, can be exactly the same ones — sending mail has nothing to
-// do with which database the data came from.
+// The Firebase key must be for the tavasya-investments project, which all
+// three sections use.
 // ============================================================
 //
 // Required environment variables (set as GitHub Actions secrets):
-//   FIREBASE_SERVICE_ACCOUNT_JSON   — full JSON key for the INVESTMENTS
-//                                     project, as a single-line string
+//   FIREBASE_SERVICE_ACCOUNT_JSON   — full JSON key for the
+//                                     tavasya-investments project, as a
+//                                     single-line string
 //   MS365_EMAIL                     — the mailbox sending the mail (also the FROM address)
 //   MS365_APP_PASSWORD              — that mailbox's App Password
 //
@@ -43,6 +46,28 @@ const db = getFirestore();
 
 const APP_URL = process.env.APP_URL || "";
 
+// One entry per section this script covers.
+const SECTIONS = [
+  {
+    name: "Investments", subject: "Investment tasks", page: "investments.html",
+    tasks: "investmentTasks", log: "investmentReminderLog",
+    parentId: "investmentId", parentName: "investmentName"
+  },
+  {
+    name: "Investor Relations", subject: "Investor relations tasks", page: "investor-relations.html",
+    tasks: "investorTasks", log: "investorReminderLog",
+    parentId: "investorId", parentName: "investorName"
+  }
+];
+
+// APP_URL may be the site's root (with or without a trailing slash) or a
+// page on it; either way, link to the section's own page.
+function pageLink(page) {
+  if (!APP_URL) return "";
+  const base = /\.html?$/i.test(APP_URL) ? APP_URL.replace(/[^/]*$/, "") : APP_URL.replace(/\/?$/, "/");
+  return base + page;
+}
+
 const transporter = nodemailer.createTransport({
   host: "smtp.office365.com",
   port: 587,
@@ -52,7 +77,7 @@ const transporter = nodemailer.createTransport({
 
 async function sendMail(to, subject, html) {
   await transporter.sendMail({
-    from: `"Tavasya Investments" <${process.env.MS365_EMAIL}>`,
+    from: `"Tavasya Capital" <${process.env.MS365_EMAIL}>`,
     to, subject, html
   });
 }
@@ -78,7 +103,7 @@ function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function rowHtml(t) {
+function rowHtml(t, sec) {
   const d = daysBetween(t.dueDate);
   const overdue = d < 0;
   const color = overdue ? "#C1543F" : d <= 3 ? "#C9A24B" : "#7C8B82";
@@ -93,16 +118,16 @@ function rowHtml(t) {
     <td style="padding:8px 12px;border-bottom:1px solid #2A2F2B;color:${color};font-weight:600;white-space:nowrap">${label}</td>
     <td style="padding:8px 12px;border-bottom:1px solid #2A2F2B">
       <div style="font-weight:600;color:#ECE7DC">${escapeHtml(t.title)}${prio}</div>
-      <div style="font-size:12px;color:#9CA39A">${escapeHtml(t.investmentName || "")}${t.schemeName ? " · " + escapeHtml(t.schemeName) : ""}${t.category ? " · " + escapeHtml(t.category) : ""}</div>
+      <div style="font-size:12px;color:#9CA39A">${escapeHtml(t[sec.parentName] || "")}${t.schemeName ? " · " + escapeHtml(t.schemeName) : ""}${t.category ? " · " + escapeHtml(t.category) : ""}</div>
     </td>
     <td style="padding:8px 12px;border-bottom:1px solid #2A2F2B">${t.link ? `<a href="${escapeHtml(t.link)}" style="color:#C9A24B">Open link</a>` : "—"}</td>
   </tr>`;
 }
 
-function digestHtml(items, heading) {
+function digestHtml(items, heading, sec) {
   return `
   <div style="font-family:sans-serif;background:#0F1210;padding:24px;color:#ECE7DC">
-    <h2 style="font-family:Georgia,serif;font-style:italic;color:#C9A24B;margin:0 0 4px">Tavasya Capital Investments</h2>
+    <h2 style="font-family:Georgia,serif;font-style:italic;color:#C9A24B;margin:0 0 4px">Tavasya Capital ${escapeHtml(sec.name)}</h2>
     <p style="color:#9CA39A;margin:0 0 20px;font-size:14px">${heading}</p>
     <table style="width:100%;border-collapse:collapse;background:#171B18;border:1px solid #2A2F2B;border-radius:4px;overflow:hidden">
       <thead><tr>
@@ -111,9 +136,9 @@ function digestHtml(items, heading) {
         <th style="text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;color:#6B7169">Task</th>
         <th style="text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;color:#6B7169">Link</th>
       </tr></thead>
-      <tbody>${items.map(rowHtml).join("")}</tbody>
+      <tbody>${items.map((t) => rowHtml(t, sec)).join("")}</tbody>
     </table>
-    ${APP_URL ? `<p style="margin-top:18px"><a href="${escapeHtml(APP_URL)}" style="color:#C9A24B;font-size:13px">Open the Investments app →</a></p>` : ""}
+    ${APP_URL ? `<p style="margin-top:18px"><a href="${escapeHtml(pageLink(sec.page))}" style="color:#C9A24B;font-size:13px">Open ${escapeHtml(sec.name)} →</a></p>` : ""}
     <p style="color:#6B7169;font-size:12px;margin-top:20px">
       Tick a task complete in the app and it stops appearing here. This mail runs daily until then.
       Tasks marked "open / no date" never appear in this email at all.
@@ -122,7 +147,15 @@ function digestHtml(items, heading) {
 }
 
 async function run() {
-  const snap = await db.collection("investmentTasks").where("completed", "==", false).get();
+  const usersSnap = await db.collection("users").where("active", "==", true).get();
+  const users = usersSnap.docs.map((d) => d.data());
+  const admins = users.filter((u) => u.role === "admin").map((u) => u.email);
+
+  for (const sec of SECTIONS) await runSection(sec, admins);
+}
+
+async function runSection(sec, admins) {
+  const snap = await db.collection(sec.tasks).where("completed", "==", false).get();
 
   const due = snap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
@@ -132,13 +165,9 @@ async function run() {
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
   if (due.length === 0) {
-    console.log("Nothing due — no mail sent.");
+    console.log(`${sec.name}: nothing due — no mail sent.`);
     return;
   }
-
-  const usersSnap = await db.collection("users").where("active", "==", true).get();
-  const users = usersSnap.docs.map((d) => d.data());
-  const admins = users.filter((u) => u.role === "admin").map((u) => u.email);
 
   const byOwner = new Map();
   const unassigned = [];
@@ -167,22 +196,22 @@ async function run() {
     const heading = `${unique.length} task${unique.length === 1 ? "" : "s"} due or overdue as of ${today}` +
       (overdueCount ? ` — ${overdueCount} overdue` : "");
     try {
-      await sendMail(email, `Investment tasks — ${today}`, digestHtml(unique, heading));
-      console.log(`Sent to ${email}: ${unique.length} task(s)`);
+      await sendMail(email, `${sec.subject} — ${today}`, digestHtml(unique, heading, sec));
+      console.log(`${sec.name}: sent to ${email}: ${unique.length} task(s)`);
     } catch (e) {
-      console.error(`Failed sending to ${email}:`, e.message);
+      console.error(`${sec.name}: failed sending to ${email}:`, e.message);
     }
   }
 
   const log = db.batch();
   for (const t of due) {
-    log.set(db.collection("investmentReminderLog").doc(t.id), {
+    log.set(db.collection(sec.log).doc(t.id), {
       lastReminderSent: todayISO(),
       reminderCount: (t.reminderCount || 0) + 1,
       title: t.title || "",
-      investmentId: t.investmentId || ""
+      [sec.parentId]: t[sec.parentId] || ""
     }, { merge: true });
-    log.set(db.collection("investmentTasks").doc(t.id), {
+    log.set(db.collection(sec.tasks).doc(t.id), {
       lastReminderSent: todayISO(),
       reminderCount: (t.reminderCount || 0) + 1
     }, { merge: true });

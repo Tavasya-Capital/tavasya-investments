@@ -2,19 +2,16 @@
 //  EDIT THIS FILE — it is the only one you need to change.
 //  Everything else works as-is.
 //
-//  This app runs on its OWN Firebase project, entirely separate from
-//  the compliance register. That means its own database, its own
-//  sign-ins and its own team list — nothing here can affect the
-//  compliance app, and nothing there can affect this one. The trade-off
-//  is that everyone sets a password here once, separately, the first
-//  time they sign in.
+//  Compliance, Investments and Investor Relations all run on this one
+//  Firebase project: one sign-in, one team list, one database.
 // ============================================================
 
 // 1. Your team's email domain. Only these addresses can sign in.
 export const ORG_DOMAIN = "tavasyacapital.in";
 
-// 2. The "Tavasya Investments" Firebase project (project ID
-//    tavasya-investments, project number 16070672279).
+// 2. The Firebase project everything runs on. It's still called "Tavasya
+//    Investments" (project ID tavasya-investments, project number
+//    16070672279), from before Compliance and Investor Relations joined.
 //
 //    These aren't secrets — they only say WHICH Firebase project to talk
 //    to, not who may read it. Access is enforced by firestore.rules and
@@ -131,6 +128,58 @@ export const OPTIONS = {
   ],
 
   // How urgent a task is. "Normal" is the default and shows no tag in
-  // the lists — only the ones above it get a coloured label.
-  priorities: ["Normal", "High", "Critical"]
+  // the lists — only the ones above it get a coloured label. Shared by
+  // Investments and Investor Relations tasks.
+  priorities: ["Normal", "High", "Critical"],
+
+
+  // ---------------- Compliance ----------------
+  // Carried over from the standalone Compliance Register.
+  frequencies: [
+    "One-time", "Per valuation", "Ongoing", "Quarterly",
+    "Half-yearly", "Annual", "Phased"
+  ],
+  // Seed values only — the live list lives in Firestore (complianceTypes
+  // collection) so anyone can add a new type inline from the compliance
+  // form. This array just seeds that collection the first time it's empty.
+  defaultComplianceTypes: [
+    "SEBI/AIF Regulatory", "Tax", "Statutory/ROC", "Other"
+  ],
+
+
+  // ---------------- Investor Relations ----------------
+  // Starting values for the investor form's dropdowns. Like the
+  // Investments ones, each ends with "+ Add new…" in the app.
+  investorTypes: ["Individual", "Company", "Partnership", "Trust"],
+
+  // Where the relationship stands. Order matters: the dashboard's
+  // "By status" panel follows it.
+  investorStatuses: [
+    "Prospect",
+    "In discussion",
+    "Committed",
+    "Onboarded",
+    "Exited"
+  ],
+
+  investorIndustries: [
+    "Family Office",
+    "Financial Services",
+    "Manufacturing",
+    "Real Estate",
+    "Technology",
+    "Healthcare",
+    "Professional Services",
+    "Other"
+  ],
+
+  investorTaskCategories: [
+    "KYC / Onboarding",
+    "Documentation",
+    "Drawdown / Capital call",
+    "Distribution",
+    "Reporting",
+    "Meeting / Call",
+    "Other"
+  ]
 };
