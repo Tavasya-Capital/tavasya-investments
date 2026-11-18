@@ -2,7 +2,7 @@
 //  EDIT THIS FILE — it is the only one you need to change.
 //  Everything else works as-is.
 //
-//  Compliance, Investments and Investor Relations all run on this one
+//  Compliance, Investments, Investor Relations and Schemes all run on this one
 //  Firebase project: one sign-in, one team list, one database.
 // ============================================================
 
@@ -180,6 +180,22 @@ export const OPTIONS = {
     "Distribution",
     "Reporting",
     "Meeting / Call",
+    "Other"
+  ],
+
+
+  // ---------------- Schemes ----------------
+  // Starting list for a scheme document's Type. Ends with "+ Add new…" in
+  // the app; the order here is the order documents are grouped in on a
+  // scheme's page.
+  schemeDocumentTypes: [
+    "Private Placement Memorandum (PPM)",
+    "Approval Note",
+    "Trust Deed",
+    "Investment Management Agreement",
+    "Contribution Agreement",
+    "SEBI Registration / Correspondence",
+    "Board / Committee Resolution",
     "Other"
   ]
 };

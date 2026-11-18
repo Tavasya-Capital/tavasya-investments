@@ -1,5 +1,5 @@
-// The front door: sign-in, then a choice of Compliance, Investments or
-// Investor Relations. Each of those is its own page; they share this
+// The front door: sign-in, then a choice of Compliance, Investments,
+// Investor Relations or Schemes. Each of those is its own page; they share this
 // sign-in through common.js.
 import { ORG_DOMAIN } from "./config.js";
 import { auth, db, FUNCTIONS } from "./common.js";
@@ -167,6 +167,23 @@ async function boot() {
   renderHubStatus();
 }
 
+// Schemes has nothing due, so its card counts documents instead.
+async function renderSchemesStatus() {
+  const el = $("hub-status-schemes");
+  try {
+    const [docs, schemes] = await Promise.all([
+      getDocs(collection(db, "schemeDocuments")), getDocs(collection(db, "schemes"))
+    ]);
+    const live = docs.docs.filter((d) => (d.data().status || "Current") !== "Superseded").length;
+    const n = schemes.docs.filter((d) => d.data().active !== false).length;
+    el.innerHTML = live
+      ? `<span class="task-dot clear">${live} document${live === 1 ? "" : "s"} across ${n} scheme${n === 1 ? "" : "s"}</span>`
+      : `<span class="task-dot open">No documents yet</span>`;
+  } catch (e) {
+    el.innerHTML = "";
+  }
+}
+
 /* ============================ hub cards ============================
    A one-line pulse on each card: how much is overdue or due within a week.
    Each section is read separately, so one that can't be read (say, before
@@ -190,6 +207,7 @@ const HUB_SOURCES = {
 };
 
 function renderHubStatus() {
+  renderSchemesStatus();
   Object.entries(HUB_SOURCES).forEach(async ([key, src]) => {
     const el = $(`hub-status-${key}`);
     try {
@@ -200,7 +218,7 @@ function renderHubStatus() {
       const parts = [];
       if (overdue) parts.push(`<span class="task-dot overdue">${overdue} overdue</span>`);
       if (soon) parts.push(`<span class="task-dot duesoon">${soon} due this week</span>`);
-      el.innerHTML = parts.join("") || `<span class="task-dot clear">Nothing overdue or due this week</span>`;
+      el.innerHTML = parts.join("") || `<span class="task-dot clear">All clear</span>`;
     } catch (e) {
       el.innerHTML = "";
     }
