@@ -110,6 +110,10 @@ function digestHtml(items, heading) {
   </div>`;
 }
 
+// Emails that couldn't be sent. Counted so the run ends in failure (a red
+// cross in the Actions tab) instead of looking fine while nobody gets anything.
+let failedSends = 0;
+
 async function run() {
   const complianceSnap = await db.collection("compliances").where("completed", "==", false).get();
   const due = complianceSnap.docs
@@ -163,6 +167,7 @@ async function run() {
       console.log(`Sent to ${email}: ${unique.length} item(s)`);
     } catch (e) {
       console.error(`Failed sending to ${email}:`, e.message);
+      failedSends++;
     }
   }
 
@@ -177,6 +182,11 @@ async function run() {
     }, { merge: true });
   }
   await log.commit();
+
+  if (failedSends) {
+    console.error(`${failedSends} email(s) failed to send — see the errors above.`);
+    process.exitCode = 1;
+  }
 }
 
 run().catch((e) => { console.error(e); process.exit(1); });

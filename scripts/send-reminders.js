@@ -146,12 +146,22 @@ function digestHtml(items, heading, sec) {
   </div>`;
 }
 
+// Emails that couldn't be sent. Counted so the run ends in failure (a red
+// cross in the Actions tab, and GitHub's usual failure email) instead of
+// looking fine while nobody gets anything.
+let failedSends = 0;
+
 async function run() {
   const usersSnap = await db.collection("users").where("active", "==", true).get();
   const users = usersSnap.docs.map((d) => d.data());
   const admins = users.filter((u) => u.role === "admin").map((u) => u.email);
 
   for (const sec of SECTIONS) await runSection(sec, admins);
+
+  if (failedSends) {
+    console.error(`${failedSends} email(s) failed to send — see the errors above. Usually the MS365_EMAIL / MS365_APP_PASSWORD secrets, or SMTP AUTH being switched off for that mailbox.`);
+    process.exitCode = 1;
+  }
 }
 
 async function runSection(sec, admins) {
@@ -200,6 +210,7 @@ async function runSection(sec, admins) {
       console.log(`${sec.name}: sent to ${email}: ${unique.length} task(s)`);
     } catch (e) {
       console.error(`${sec.name}: failed sending to ${email}:`, e.message);
+      failedSends++;
     }
   }
 

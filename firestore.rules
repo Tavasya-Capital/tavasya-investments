@@ -1,12 +1,12 @@
 rules_version = '2';
 
 // ============================================================
-//  Tavasya Capital — Compliance, Investments and Investor Relations:
-//  security rules
+//  Tavasya Capital — Compliance, Investments, Investor Relations and
+//  Schemes: security rules
 //
 //  Paste the whole of this file into
 //  Firebase Console → Firestore Database → Rules → Publish,
-//  on the tavasya-investments project, which all three sections use.
+//  on the tavasya-investments project, which every section uses.
 //  (Not the old tavasya-compliance-a2295 project the standalone
 //  Compliance Register ran on.)
 //
@@ -88,7 +88,8 @@ service cloud.firestore {
     // ---------- dropdown values ----------
     // One document per dropdown (instrument, stage, cirpStage, sector,
     // tranche, category, priority, leadDays for Investments; investorType,
-    // investorStatus, industry, investorCategory for Investor Relations),
+    // investorStatus, industry, investorCategory for Investor Relations;
+    // documentType for Schemes),
     // each holding a `values` array of whatever has
     // been added from inside the app via "+ Add new…".
     //
@@ -197,6 +198,26 @@ service cloud.firestore {
     match /investorReminderLog/{taskId} {
       allow get, list: if isMember();
       allow write: if false;
+    }
+
+    // ================= SCHEMES =================
+
+    // ---------- scheme documents ----------
+    // One document per record (a PPM, an approval note…), linked to its
+    // scheme by schemeCode. Holds the details and a link; the file itself
+    // stays in SharePoint / OneDrive. Deleting is Admin or Team Lead, like a
+    // task; everyone else marks an old version "Superseded" instead.
+    match /schemeDocuments/{documentId} {
+      allow get, list: if isMember();
+
+      allow create: if isMember()
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.schemeCode is string
+        && request.resource.data.schemeCode.size() > 0;
+
+      allow update: if isMember();
+      allow delete: if isAdmin() || isTeamLead();
     }
 
     // ================= COMPLIANCE =================

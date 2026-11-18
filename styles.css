@@ -265,7 +265,7 @@ table.ledger{ width:100%; border-collapse:collapse; font-size:13.5px }
 .badge-ONGOING{ background:var(--ongoing-soft); color:var(--ongoing) }
 .oblig-name{ font-weight:500 }
 .oblig-period{ display:block; font-size:12px; color:var(--ink-faint); margin-top:2px }
-.row-link{ color:var(--accent); font-size:12px; text-decoration:none }
+.row-link{ color:var(--accent); font-size:12px; text-decoration:none; white-space:nowrap }
 .row-link:hover{ text-decoration:underline }
 /* The actions column (Link, Edit, Archive) sits under a blank header, so
    pinning it to the right edge left it floating away from the grid every
@@ -577,12 +577,21 @@ body:has(tr.dragging){ user-select:none; cursor:grabbing }
 /* ---------------- investor form ---------------- */
 .contact-block{ display:flex; flex-direction:column; gap:12px }
 
+/* ---------------- scheme documents ---------------- */
+.doc-groups{ padding-bottom:8px }
+.doc-groups .section-label{ padding-top:18px }
+.doc-list{ padding-top:0 }
+.doc-title-link{ color:var(--ink); text-decoration:none }
+.doc-title-link:hover{ color:var(--accent); text-decoration:underline }
+.doc-notes{ margin:6px 0 0; font-size:12.5px; color:var(--ink-dim); line-height:1.5 }
+.doc-row.superseded .task-title, .doc-row.superseded .doc-title-link{ color:var(--ink-faint); text-decoration:line-through }
+
 /* ---------------- hub (index.html) ---------------- */
 a.brand{ color:inherit; text-decoration:none }
 a.brand:hover .brand-name{ color:var(--accent) }
 .switch-link{ text-decoration:none; white-space:nowrap }
 .hub-who{ margin-left:auto }
-.hub-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px }
+.hub-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px }
 .hub-card{ text-decoration:none; padding:24px 24px 18px; min-height:220px }
 .hub-card-eyebrow{ margin:0; font-family:var(--font-mono); letter-spacing:.08em }
 .hub-card-name{ font-size:24px }
@@ -591,8 +600,7 @@ a.brand:hover .brand-name{ color:var(--accent) }
 /* ---------------- responsive ---------------- */
 @media (max-width:980px){
   .two-col{ grid-template-columns:1fr }
-  .hub-grid{ grid-template-columns:1fr }
-  .hub-card{ min-height:0 }
+  .hub-grid{ grid-template-columns:1fr 1fr }
   .stat-row{ grid-template-columns:repeat(2,1fr) }
 }
 @media (max-width:760px){
@@ -605,6 +613,8 @@ a.brand:hover .brand-name{ color:var(--accent) }
   .kpi-strip{ grid-template-columns:repeat(2,1fr) }
   .kpi{ border-bottom:1px solid var(--line) }
   .field-row{ grid-template-columns:1fr }
+  .hub-grid{ grid-template-columns:1fr }
+  .hub-card{ min-height:0 }
   .table-wrap{ overflow-x:auto }
   table.ledger{ min-width:860px }
   .drawer{ width:100vw }
@@ -615,4 +625,6 @@ a.brand:hover .brand-name{ color:var(--accent) }
   .weekly-head{ flex-wrap:wrap; gap:12px }
   .weekly-title-group{ flex:1 1 100% }
   .panel-head .register-actions{ flex:1 1 100%; justify-content:space-between; align-items:center }
+  .panel-head-row{ flex-wrap:wrap; gap:12px }
+  .register-actions{ flex-wrap:wrap }
 }

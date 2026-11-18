@@ -2,8 +2,8 @@
 //  Shared by every page: one Firebase connection, one sign-in.
 //
 //  Signing in happens once, on index.html. Firebase keeps the session in
-//  the browser, so the Compliance, Investments and Investor Relations
-//  pages all see the same signed-in person without asking again.
+//  the browser, so the Compliance, Investments, Investor Relations and
+//  Schemes pages all see the same signed-in person without asking again.
 //  Each of those pages calls requireSession() before showing anything.
 // ============================================================
 import { ORG_DOMAIN, firebaseConfig } from "./config.js";
@@ -15,12 +15,13 @@ export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// The three functions the hub offers. The key doubles as the ?next= value
+// The functions the hub offers. The key doubles as the ?next= value
 // that brings someone back to the page they were on after signing in.
 export const FUNCTIONS = {
   compliance: { name: "Compliance", page: "compliance.html" },
   investments: { name: "Investments", page: "investments.html" },
-  "investor-relations": { name: "Investor Relations", page: "investor-relations.html" }
+  "investor-relations": { name: "Investor Relations", page: "investor-relations.html" },
+  schemes: { name: "Schemes", page: "schemes.html" }
 };
 
 // Resolves with { user, profile } once the person is signed in, has

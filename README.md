@@ -1,8 +1,8 @@
-# Tavasya Capital — Compliance, Investments and Investor Relations
+# Tavasya Capital — Compliance, Investments, Investor Relations and Schemes
 
-Three of Tavasya's functions in one web app, behind one sign-in. Sign in,
-pick **Compliance**, **Investments** or **Investor Relations**, and work
-there. Switch between them at any time from the top of each page.
+Four of Tavasya's functions in one web app, behind one sign-in. Sign in,
+pick **Compliance**, **Investments**, **Investor Relations** or
+**Schemes**, and work there. Switch between them at any time from the top of each page.
 
 No build step, no framework. Plain HTML/CSS/JS, Firebase for data and
 login, GitHub Pages for hosting, GitHub Actions for the daily emails.
@@ -15,22 +15,22 @@ only the Investments app. The live address is unchanged:
 
 ## How it fits together
 
-- **`index.html` — sign-in and the hub.** After signing in you see three
+- **`index.html` — sign-in and the hub.** After signing in you see four
   cards, one per function, each with a one-line count of what's overdue
-  or due this week. Open a section's page directly (a bookmark, a link in
+  or due this week (for Schemes, how many documents are on record). Open a section's page directly (a bookmark, a link in
   a reminder email) without being signed in, and you're sent to sign in
   first, then straight back to that page.
-- **One page per function:** `compliance.html`, `investments.html` and
-  `investor-relations.html`, each with its own script. `common.js` holds
+- **One page per function:** `compliance.html`, `investments.html`,
+  `investor-relations.html` and `schemes.html`, each with its own script. `common.js` holds
   the shared Firebase connection and sign-in check; `config.js` holds the
-  settings; `styles.css` is shared, so all three look the same.
+  settings; `styles.css` is shared, so they all look the same.
 - **One Firebase project, `tavasya-investments`,** holds everything: the
   sign-ins, the team list, the schemes and every section's records.
 - **One sign-in and one team list.** Everyone signs in with their existing
   Tavasya Investments account. The Team tab in each section edits the
-  same list, and whoever is on it can open all three sections.
+  same list, and whoever is on it can open every section.
 - **Schemes are shared.** Adding or archiving a scheme on any section's
-  Schemes tab changes it everywhere.
+  Schemes tab, or in the Schemes section, changes it everywhere.
 
 ---
 
@@ -286,14 +286,54 @@ daily reminders), with their own category list.
 
 ---
 
+## Schemes
+
+Each scheme's key documents in one place: the Private Placement
+Memorandum, approval notes, the trust deed and so on. Built on the same
+pattern as Investments, with documents under each scheme the way tasks sit
+under each investment. The app keeps each document's details and a link
+to it; the file itself stays in SharePoint or OneDrive.
+
+- **Schemes** — a card per scheme showing how many documents it has, which
+  types, the latest one, and whether any are still drafts. Click through
+  to the scheme's page: its documents grouped by type, each with its date,
+  version, notes, who added it and an **Open ↗** link. **+ Add document**
+  from there or from the top of the tab. Admins can also add a scheme, and
+  archive or restore one, here — it's the same scheme list every section
+  uses.
+- **All documents** — every document across every scheme in one table,
+  searchable and filterable by scheme, type and status. Click a row to go
+  to its scheme.
+- **Team** — the shared team list.
+
+### What one document holds
+
+| Field | Notes |
+|---|---|
+| Document | Required — its name, e.g. "Private Placement Memorandum" |
+| Scheme | Required |
+| Type | PPM, Approval Note, Trust Deed, Investment Management Agreement, Contribution Agreement, SEBI Registration / Correspondence, Board / Committee Resolution, Other — or **+ Add new…** |
+| Link | Where the file lives (must start with `https://`). Optional, so a document can be recorded before it's uploaded |
+| Document date | |
+| Version | Free text, e.g. "v2", "Final", "Addendum 1" |
+| Status | **Current** (in force), **Draft** (not final yet) or **Superseded** (replaced by a newer one). Superseded documents are hidden unless you tick "Show superseded" |
+| Notes | |
+
+Anyone can add and edit documents. Deleting one needs Admin or Team Lead;
+to keep an old version on record instead, set it to Superseded. The
+starting list of types, and the order they're grouped in, is in
+`config.js` (`schemeDocumentTypes`).
+
+---
+
 ## Roles
 
-One set of roles across all three sections.
+One set of roles across every section.
 
 | Role | Can do |
 |---|---|
 | **Member** | See everything. Add and edit any record or task, tick things complete (with proof, for compliance). Add a compliance type. |
-| **Team Lead** | Everything a Member can, plus delete a task and a compliance type, and import compliance from Excel. |
+| **Team Lead** | Everything a Member can, plus delete a task, a scheme document and a compliance type, and import compliance from Excel. |
 | **Admin** | Everything above, plus manage the team list, add and archive Schemes, delete an investment, investor or compliance row outright, and see the compliance detail popup. |
 
 The Investments and Investor Relations Team tabs won't let the last active
@@ -411,6 +451,7 @@ The domain is already set correctly (`tavasyacapital.in`) — no edit needed.
    compliance.html, compliance.js
    investments.html, investments.js
    investor-relations.html, investor-relations.js
+   schemes.html, schemes.js
    scripts/send-reminders.js, scripts/send-compliance-reminders.js, scripts/migrate-compliance.js
    .github/workflows/reminders.yml, .github/workflows/migrate-compliance.yml
    ```
@@ -474,7 +515,7 @@ repo. `.gitignore` is set up to help you avoid committing one by accident.
 |---|---|---|
 | `users` | All | The team list and roles. Managed from any Team tab |
 | `schemes` | All | The scheme list. Managed from any Schemes tab |
-| `optionLists` | Investments, Investor Relations | Dropdown values added from inside the app via "+ Add new…" |
+| `optionLists` | Investments, Investor Relations, Schemes | Dropdown values added from inside the app via "+ Add new…" |
 | `compliances` | Compliance | One document per obligation |
 | `complianceTypes` | Compliance | The compliance type list |
 | `reminderLog` | Compliance | What the daily mail last sent (written by the script only) |
@@ -484,6 +525,7 @@ repo. `.gitignore` is set up to help you avoid committing one by accident.
 | `investors` | Investor Relations | One document per investor |
 | `investorTasks` | Investor Relations | One document per task, linked by `investorId`. Same shape as investment tasks |
 | `investorReminderLog` | Investor Relations | What the daily mail last sent (written by the script only) |
+| `schemeDocuments` | Schemes | One document per record (a PPM, an approval note…), linked to its scheme by `schemeCode`. Holds the details and the link, not the file |
 
 Nothing else is reachable: the rules block everything else outright.
 
@@ -495,6 +537,7 @@ Nothing else is reachable: the rules block everything else outright.
 |---|---|
 | Sign-in screen appears, then nothing works | `config.js` points at the wrong Firebase project, or one that isn't set up — Step 2 |
 | Compliance or Investor Relations says "Missing or insufficient permissions" | The updated `firestore.rules` hasn't been published yet — "Switching over", step 1 |
+| Schemes section says "Missing or insufficient permissions" | The latest `firestore.rules` (with the `schemeDocuments` rule) hasn't been published yet — paste it into Firebase → Firestore Database → Rules → Publish |
 | Compliance register is empty | The compliance data hasn't been copied across yet — "Switching over", steps 2–4 |
 | "Missing or insufficient permissions" everywhere | Rules not published (Step 3), or the `users` document ID isn't the exact lowercase email, or `active` was saved as text `"true"` instead of boolean `true` |
 | Confirmation email never arrives | Check spam; confirm the GitHub Pages domain is in Authorised domains (Step 5) |
